@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>无锡消融：12 窗 wall 倍率（按库）</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 0; padding: 20px 24px 32px; background: #fff; color: #1e293b; max-width: 1260px; margin-left: auto; margin-right: auto; }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 10px 0; color: #0f172a; }
+    .sub { font-size: 13px; color: #64748b; line-height: 1.55; margin: 0 0 8px 0; max-width: 1100px; }
+    .legend { font-size: 12px; color: #475569; margin: 12px 0 0 0; display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .sw { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; border: 1px solid rgba(0,0,0,.08); }
+    svg { display: block; width: 100%; max-width: 1240px; height: auto; margin-top: 8px; }
+    table.sumtbl { width: 100%; max-width: 1240px; border-collapse: collapse; font-size: 12px; margin: 10px 0 4px 0; }
+    table.sumtbl th, table.sumtbl td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: right; vertical-align: top; }
+    table.sumtbl th:first-child, table.sumtbl td:first-child { text-align: left; white-space: nowrap; }
+    table.sumtbl thead th { background: #f8fafc; color: #334155; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>无锡消融：bench 验证 12 窗 × 三库（1 / 164 / 按 1 小时分 SST）</h1>
+  <!-- WUXI_ABLATION_LEDE -->
+  <p class="sub"><strong>指标</strong>：<code>sum(vanilla_wall_us) / sum(prune_wall_us)</code>，其中 <strong>vanilla_wall_us</strong> 来自上游<strong>无改动的 Vanilla RocksDB</strong>，并对每 (库×窗) 预先测量 <strong>10 次</strong>取<strong>中位数</strong>写入缓存 <code>wuxi_vanilla_wall_cache.json</code>（路径见各 run 下 <code>wuxi_ablation_run_meta.json</code>）。每库 12 个 cov 窗（<code>full_keys≥50</code>）先按窗求和再相除。<strong>Base</strong> 为 <strong>1.0×</strong>；其余柱为 Global / Local / L+G 的<strong>算术平均倍率</strong>（<strong>10 次</strong>消融独立重复，每次均带 <code>-VerifyKVResults</code>）。原始 TSV：<code>D:/Project/data/experiments/wuxi_ablation_vanilla_baseline_20260412_142620/run_01</code> …；汇总：<code>aggregate.json</code>（<code>D:/Project/data/experiments/wuxi_ablation_vanilla_baseline_20260412_142620</code>）。多 SST 档为 776 目录缺失时的 <strong>736sst</strong> 回退。</p>
+  <p class="sub"><strong>柱高</strong>：每簇按该簇四柱<strong>最大倍率</strong>归一化；柱顶标签为平均倍率。1 SST 上 Global 相对 Base 可略低于或略高于 1×（取决于重复与噪声）。736 簇 Base 柱设<strong>最小可视高度</strong>，数值仍以标签为准。</p>
+  <!-- /WUXI_ABLATION_LEDE -->
+
+  <svg viewBox="0 0 1240 400" xmlns="http://www.w3.org/2000/svg">
+    <line x1="72" y1="52" x2="72" y2="302" stroke="#64748b" stroke-width="1.5"/>
+    <text x="38" y="178" font-size="11" fill="#64748b" text-anchor="middle" transform="rotate(-90 38 178)">簇内相对高度</text>
+    <g font-size="10" fill="#64748b" text-anchor="end">
+      <line x1="68" y1="302" x2="1220" y2="302" stroke="#e2e8f0" stroke-width="1"/>
+      <text x="64" y="306">0</text>
+      <line x1="72" y1="252" x2="1220" y2="252" stroke="#f1f5f9" stroke-width="1"/>
+      <text x="64" y="256">0.2</text>
+      <line x1="72" y1="202" x2="1220" y2="202" stroke="#f1f5f9" stroke-width="1"/>
+      <text x="64" y="206">0.4</text>
+      <line x1="72" y1="152" x2="1220" y2="152" stroke="#f1f5f9" stroke-width="1"/>
+      <text x="64" y="156">0.6</text>
+      <line x1="72" y1="102" x2="1220" y2="102" stroke="#f1f5f9" stroke-width="1"/>
+      <text x="64" y="106">0.8</text>
+      <line x1="72" y1="52" x2="1220" y2="52" stroke="#f1f5f9" stroke-width="1"/>
+      <text x="64" y="56">1.0</text>
+    </g>
+    <line x1="72" y1="302" x2="1180" y2="302" stroke="#94a3b8" stroke-width="2"/>
+    <g transform="translate(48, 0)" font-family="Segoe UI, Microsoft YaHei, sans-serif">
+      <!-- 1 SST vmax=2.581117 mean over runs -->
+      <text x="230" y="36" text-anchor="middle" font-size="12" fill="#1e3a8a" font-weight="600">1 SST</text>
+      <g font-size="9" fill="#475569">
+        <text x="158" y="318" text-anchor="middle">Base</text>
+        <text x="206" y="318" text-anchor="middle">Global</text>
+        <text x="254" y="318" text-anchor="middle">Local</text>
+        <text x="302" y="318" text-anchor="middle">L+G</text>
+      </g>
+      <rect x="139" y="205.14" width="38" height="96.86" fill="#2563eb" stroke="#fff" stroke-width="1"/>
+      <text x="158" y="199" font-size="9" text-anchor="middle" fill="#1e3a8a">1×</text>
+      <rect x="187" y="204.46" width="38" height="97.54" fill="#2563eb" stroke="#fff" stroke-width="1"/>
+      <text x="206" y="198" font-size="9" text-anchor="middle" fill="#1e3a8a">1.01×</text>
+      <rect x="235" y="52.00" width="38" height="250.00" fill="#2563eb" stroke="#fff" stroke-width="1"/>
+      <text x="254" y="46" font-size="10" text-anchor="middle" fill="#1e3a8a">2.58×</text>
+      <rect x="283" y="57.93" width="38" height="244.07" fill="#2563eb" stroke="#fff" stroke-width="1"/>
+      <text x="302" y="52" font-size="10" text-anchor="middle" fill="#1e3a8a">2.52×</text>
+      <!-- 164 SST vmax=6.868046 mean over runs -->
+      <text x="610" y="36" text-anchor="middle" font-size="12" fill="#115e59" font-weight="600">164 SST</text>
+      <g font-size="9" fill="#475569">
+        <text x="538" y="318" text-anchor="middle">Base</text>
+        <text x="586" y="318" text-anchor="middle">Global</text>
+        <text x="634" y="318" text-anchor="middle">Local</text>
+        <text x="682" y="318" text-anchor="middle">L+G</text>
+      </g>
+      <rect x="519" y="265.60" width="38" height="36.40" fill="#0d9488" stroke="#fff" stroke-width="1"/>
+      <text x="538" y="260" font-size="8" text-anchor="middle" fill="#115e59">1×</text>
+      <rect x="567" y="287.88" width="38" height="14.12" fill="#0d9488" stroke="#fff" stroke-width="1"/>
+      <text x="586" y="282" font-size="8" text-anchor="middle" fill="#115e59">0.39×</text>
+      <rect x="615" y="52.00" width="38" height="250.00" fill="#0d9488" stroke="#fff" stroke-width="1"/>
+      <text x="634" y="46" font-size="10" text-anchor="middle" fill="#115e59">6.87×</text>
+      <rect x="663" y="56.11" width="38" height="245.89" fill="#0d9488" stroke="#fff" stroke-width="1"/>
+      <text x="682" y="50" font-size="10" text-anchor="middle" fill="#115e59">6.76×</text>
+      <!-- 736 SST vmax=6.630151 mean over runs -->
+      <text x="990" y="36" text-anchor="middle" font-size="12" fill="#5b21b6" font-weight="600">736 SST</text>
+      <g font-size="9" fill="#475569">
+        <text x="918" y="318" text-anchor="middle">Base</text>
+        <text x="966" y="318" text-anchor="middle">Global</text>
+        <text x="1014" y="318" text-anchor="middle">Local</text>
+        <text x="1062" y="318" text-anchor="middle">L+G</text>
+      </g>
+      <rect x="899" y="264.29" width="38" height="37.71" fill="#7c3aed" stroke="#fff" stroke-width="1"/>
+      <text x="918" y="258" font-size="8" text-anchor="middle" fill="#5b21b6">1×</text>
+      <rect x="947" y="292.69" width="38" height="9.31" fill="#7c3aed" stroke="#fff" stroke-width="1"/>
+      <text x="966" y="287" font-size="8" text-anchor="middle" fill="#5b21b6">0.25×</text>
+      <rect x="995" y="52.00" width="38" height="250.00" fill="#7c3aed" stroke="#fff" stroke-width="1"/>
+      <text x="1014" y="46" font-size="10" text-anchor="middle" fill="#5b21b6">6.63×</text>
+      <rect x="1043" y="53.60" width="38" height="248.40" fill="#7c3aed" stroke="#fff" stroke-width="1"/>
+      <text x="1062" y="48" font-size="10" text-anchor="middle" fill="#5b21b6">6.59×</text>
+    </g>
+  </svg>
+
+  <!-- WUXI_ABLATION_SUMMARY_TABLE -->
+<p class="sub"><strong>汇总表</strong>：以下为 <strong>10 次</strong>消融重复的算术平均 （<code>full_keys≥50</code>）；倍率分母为 <strong>Vanilla 基线</strong>（每窗 <strong>10 次</strong>中位，见缓存 JSON）；准确性列为各模式下 verify_kv 汇总。</p>
+<table class="sumtbl">
+<thead><tr><th>模式</th><th>speedup (1 SST)</th><th>speedup (164 SST)</th><th>speedup (736 SST)</th><th>QPS Vanilla → prune (1 SST)</th><th>QPS Vanilla → prune (164 SST)</th><th>QPS Vanilla → prune (736 SST)</th><th>准确性</th></tr></thead>
+<tbody>
+<tr><td>Global</td><td>1.007×</td><td>0.388×</td><td>0.247×</td><td>59.25 → 59.67</td><td>59.01 → 22.89</td><td>57.94 → 14.30</td><td>未验证（未开 -VerifyKVResults）</td></tr>
+<tr><td>Local</td><td>2.581×</td><td>6.868×</td><td>6.630×</td><td>59.25 → 152.93</td><td>59.01 → 405.25</td><td>57.94 → 384.12</td><td>未验证（未开 -VerifyKVResults）</td></tr>
+<tr><td>Local+Global</td><td>2.520×</td><td>6.755×</td><td>6.588×</td><td>59.25 → 149.31</td><td>59.01 → 398.59</td><td>57.94 → 381.66</td><td>未验证（未开 -VerifyKVResults）</td></tr>
+</tbody></table>
+<!-- /WUXI_ABLATION_SUMMARY_TABLE -->
+
+  <div class="legend" aria-label="图例">
+    <span><span class="sw" style="background:#2563eb"></span> 1 SST（四柱同色：Base → Global → Local → L+G）</span>
+    <span><span class="sw" style="background:#0d9488"></span> 164 SST</span>
+    <span><span class="sw" style="background:#7c3aed"></span> 736 SST（按小时分桶多 SST）</span>
+  </div>
+</body>
+</html>

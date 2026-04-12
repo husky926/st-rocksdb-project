@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>ST prune 有效性 — bytes_read / data_miss</title>
+  <style>
+    body { font-family: Segoe UI, system-ui, sans-serif; margin: 24px; color: #222; }
+    h1 { font-size: 1.25rem; }
+    h2 { font-size: 1rem; margin-top: 28px; color: #444; }
+    .chart { margin: 16px 0 32px; max-width: 720px; }
+    .row { display: flex; align-items: flex-end; gap: 12px; height: 220px; border-bottom: 2px solid #333; padding-left: 8px; }
+    .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+    /* 不可对 flex 行内子项用 width:100%，否则两柱会争宽度并常坍缩为 0，导致「看不见柱」 */
+    .bar {
+      width: 44px;
+      min-width: 44px;
+      flex: 0 0 44px;
+      border-radius: 4px 4px 0 0;
+      transition: height 0.2s;
+    }
+    .b-full { background: #2563eb; }
+    .b-compact { background: #ea580c; }
+    .lab { font-size: 11px; margin-top: 8px; text-align: center; line-height: 1.3; word-break: break-all; }
+    .val { font-size: 11px; color: #555; margin-top: 4px; }
+    .legend { display: flex; gap: 20px; margin: 12px 0; font-size: 13px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .sq { width: 14px; height: 14px; border-radius: 3px; }
+    p.note { font-size: 13px; color: #555; max-width: 720px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>ST 剪枝有效性（<code>st_meta_read_bench --no-full-scan</code>）</h1>
+  <p class="note">数据来源：<code>Record.md</code> / 双库 sweep TSV。左组柱为 <strong>verify_traj_st_full（2×L0）</strong>，右组柱为 <strong>verify_traj_st_compact_work（3×L6）</strong>；同一横轴为四个代表窗。</p>
+
+  <h2>图 1 — <code>bytes_read</code>（MB）</h2>
+  <div class="legend">
+    <span><i class="sq" style="background:#2563eb"></i> 2×L0 full</span>
+    <span><i class="sq" style="background:#ea580c"></i> 3×L6 compact</span>
+  </div>
+  <div class="chart" id="c1"></div>
+
+  <h2>图 2 — <code>BLOCK_CACHE_DATA_MISS</code></h2>
+  <div class="chart" id="c2"></div>
+
+  <p class="note"><strong>读图</strong>：东向 / 近 119° 两库均低于宽窗；西向在 2×L0 明显低于宽窗，在 3×L6 与宽窗同高 —— 体现 <strong>布局对块级剪枝的影响</strong>。</p>
+
+  <script>
+    const W = ['wide', 'east', 'west', 'x_near'];
+    const labels = ['wide_baseline', 'east_x_file_disjoint', 'west_x_both_intersect', 'x_near_119_boundary'];
+    const mbFull = [78.70, 54.98, 31.70, 54.98];
+    const mbCompact = [78.74, 67.27, 78.74, 67.28];
+    const missFull = [19193, 10684, 7524, 10685];
+    const missCompact = [19112, 12234, 19110, 12238];
+
+    function renderChart(elId, titleUnit, fullArr, compactArr, maxY) {
+      const el = document.getElementById(elId);
+      const row = document.createElement('div');
+      row.className = 'row';
+      for (let i = 0; i < 4; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'bar-wrap';
+        const stack = document.createElement('div');
+        stack.style.cssText = 'display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:8px;height:200px;width:100%;min-height:200px;';
+        const h1 = (fullArr[i] / maxY) * 200;
+        const h2 = (compactArr[i] / maxY) * 200;
+        const b1 = document.createElement('div');
+        b1.className = 'bar b-full';
+        b1.style.height = Math.max(h1, 2) + 'px';
+        const b2 = document.createElement('div');
+        b2.className = 'bar b-compact';
+        b2.style.height = Math.max(h2, 2) + 'px';
+        stack.appendChild(b1);
+        stack.appendChild(b2);
+        const lab = document.createElement('div');
+        lab.className = 'lab';
+        lab.textContent = labels[i];
+        const val = document.createElement('div');
+        val.className = 'val';
+        val.textContent = fullArr[i].toFixed ? fullArr[i].toFixed(2) + ' | ' + compactArr[i].toFixed(2) : fullArr[i] + ' | ' + compactArr[i];
+        if (titleUnit === 'MB') {
+          val.textContent = fullArr[i].toFixed(2) + ' | ' + compactArr[i].toFixed(2) + ' MB';
+        } else {
+          val.textContent = fullArr[i] + ' | ' + compactArr[i];
+        }
+        wrap.appendChild(stack);
+        wrap.appendChild(lab);
+        wrap.appendChild(val);
+        row.appendChild(wrap);
+      }
+      el.appendChild(row);
+    }
+
+    renderChart('c1', 'MB', mbFull, mbCompact, 85);
+    renderChart('c2', '', missFull, missCompact, 20000);
+  </script>
+</body>
+</html>

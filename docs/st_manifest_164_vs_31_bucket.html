@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Manifest-only: 164 SST vs 31 SST</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 24px; color: #1e293b; max-width: 980px; }
+    h1 { font-size: 1.2rem; margin-bottom: 6px; }
+    .sub { color: #64748b; font-size: 13px; margin-bottom: 16px; }
+    .fig { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin: 14px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 6px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+    th:first-child, td:first-child { text-align: left; }
+    .ok { color: #065f46; font-weight: 700; }
+    code { background:#f1f5f9; border-radius:4px; padding:2px 6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h1>Manifest-only 对比：164 SST vs 31 SST（桶对齐）</h1>
+  <p class="sub">
+    同一窗口集（12 窗）+ 同一校验口径（<code>verify-kv-results</code>）。<br/>
+    164 SST: <code>data/verify_wuxi_segment_manysst</code>；31 SST: <code>data/verify_wuxi_segment_bucket31_sst</code>。<br/>
+    数据来源：<code>data/experiments/wuxi_segment_manysst_latest/manifest_only_verifykv.tsv</code> 与
+    <code>data/experiments/wuxi_segment_bucket31/manifest_only_verifykv.tsv</code>。
+  </p>
+
+  <div class="fig">
+    <svg viewBox="0 0 940 320" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="940" height="320" fill="white"/>
+      <line x1="70" y1="270" x2="920" y2="270" stroke="#94a3b8" stroke-width="2"/>
+      <line x1="70" y1="40" x2="70" y2="270" stroke="#94a3b8" stroke-width="2"/>
+      <g font-size="12" fill="#64748b">
+        <text x="62" y="270" text-anchor="end">0</text>
+        <text x="62" y="212.5" text-anchor="end">1</text>
+        <text x="62" y="155" text-anchor="end">2</text>
+        <text x="62" y="97.5" text-anchor="end">3</text>
+        <text x="62" y="40" text-anchor="end">4</text>
+      </g>
+      <!-- scale: 0..4x => 230px -->
+      <text x="280" y="28" text-anchor="middle" font-size="12" fill="#334155">164 SST</text>
+      <rect x="240" y="60.57" width="80" height="209.43" fill="#0f766e"/>
+      <text x="280" y="52" text-anchor="middle" font-size="11" fill="#0f766e">3.64x</text>
+
+      <text x="690" y="28" text-anchor="middle" font-size="12" fill="#334155">31 SST</text>
+      <rect x="650" y="204.79" width="80" height="65.21" fill="#2563eb"/>
+      <text x="690" y="197" text-anchor="middle" font-size="11" fill="#1d4ed8">1.13x</text>
+
+      <g font-size="11" fill="#475569">
+        <text x="280" y="288" text-anchor="middle">Manifest-only</text>
+        <text x="690" y="288" text-anchor="middle">Manifest-only</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="fig">
+    <table>
+      <thead>
+        <tr>
+          <th>DB</th>
+          <th>speedup_wall</th>
+          <th>QPS (full → prune)</th>
+          <th>avg skipped_files</th>
+          <th>avg considered_files</th>
+          <th>avg missing_meta</th>
+          <th>正确性</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>164 SST</td>
+          <td>3.6422x</td>
+          <td>23.887 → 87.001</td>
+          <td>112.750</td>
+          <td>164.000</td>
+          <td>0.000</td>
+          <td class="ok">12/12 OK</td>
+        </tr>
+        <tr>
+          <td>31 SST（桶对齐）</td>
+          <td>1.1342x</td>
+          <td>55.283 → 62.700</td>
+          <td>0.083</td>
+          <td>3.500</td>
+          <td>0.000</td>
+          <td class="ok">12/12 OK</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size:12px;color:#64748b;margin-top:8px;">
+      结论：31-SST 桶对齐后，文件元数据完整（missing_meta=0），但在该窗口集上 Manifest-only 的实际跳过文件数很低（avg 0.083），
+      因此整体 speedup 明显低于 164-SST 基线。
+    </p>
+  </div>
+</body>
+</html>
+

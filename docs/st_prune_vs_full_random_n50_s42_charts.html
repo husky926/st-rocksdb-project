@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PKDD 随机窗 E5 — prune/full 读盘比 (n=50, seed=42)</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 20px 24px 40px; color: #1e293b; max-width: 960px; }
+    h1 { font-size: 1.2rem; margin-bottom: 6px; }
+    h2 { font-size: 1rem; margin-top: 28px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; line-height: 1.55; margin-bottom: 16px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 16px 0; }
+    .stat { background: #f8fafc; border-radius: 8px; padding: 10px 12px; font-size: 13px; border: 1px solid #e2e8f0; }
+    .stat b { color: #0f172a; }
+    .hrow { display: flex; align-items: center; margin: 5px 0; gap: 8px; font-size: 11px; }
+    .lab { width: 200px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lab.anchor { font-weight: 700; color: #7c3aed; }
+    .track { flex: 1; height: 16px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
+    .fill { height: 100%; border-radius: 4px; min-width: 2px; }
+    .pct { width: 64px; text-align: right; font-variant-numeric: tabular-nums; color: #475569; }
+    .hist { margin: 12px 0; }
+    .hist-row { display: flex; align-items: center; margin: 4px 0; gap: 8px; font-size: 12px; }
+    .hist-lab { width: 120px; color: #64748b; }
+    .hist-bar { flex: 1; height: 20px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+    .hist-fill { height: 100%; background: #3b82f6; border-radius: 4px; }
+    .hist-n { width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+    .note { font-size: 13px; color: #475569; line-height: 1.65; margin-top: 20px; padding: 12px; background: #fffbeb; border-radius: 8px; border-left: 4px solid #eab308; }
+  </style>
+</head>
+<body>
+  <h1>PKDD 随机查询窗（E5）— <code>ratio_bytes = prune / full</code></h1>
+  <p class="sub">
+    来源：<code>data/experiments/prune_vs_full_pkdd_random_n50_s42.tsv</code> ·
+    <code>random_windows_pkdd_n50_s42.csv</code>（<strong>50</strong> 均匀随机窗 + <strong>wide_baseline_anchor</strong>）·
+    seed=<strong>42</strong> · 库 <code>verify_pkdd_st</code>。
+    横条越长表示剪枝路径相对全表扫读盘比例越高（越接近 100% 越「像全表」）。
+  </p>
+
+  <h2>分位数（脚本与图中一致）</h2>
+  <div class="stats" id="stats"></div>
+
+  <h2>图 1 — 按 ratio 升序（易看分布尾部）</h2>
+  <div id="sortChart"></div>
+
+  <h2>图 2 — 仅 random_w*：ratio 分桶计数</h2>
+  <div class="hist" id="hist"></div>
+
+  <p class="note">
+    <strong>读图</strong>：大量随机窗 <strong>ratio 很低</strong>（盒子小/与数据弱相交）；少数窗（如 <strong>w27 / w29 / w34</strong>）与数据 <strong>强相交</strong>，<strong>ratio 接近或略高于锚点 wide</strong>，属预期。
+    若重跑 TSV，请用 Python 重新导出数据或改下面对象 <code>ROWS</code>。
+  </p>
+
+  <script>
+    // 自 TSV data/experiments/prune_vs_full_pkdd_random_n50_s42.tsv 嵌入（维护时同步）
+    const ROWS = [
+      { label: "wide_baseline_anchor", r: 0.885771, anchor: true },
+      { label: "random_w00001_s42", r: 0.005873 },
+      { label: "random_w00002_s42", r: 0.005873 },
+      { label: "random_w00003_s42", r: 0.006486 },
+      { label: "random_w00004_s42", r: 0.005873 },
+      { label: "random_w00005_s42", r: 0.05224 },
+      { label: "random_w00006_s42", r: 0.005873 },
+      { label: "random_w00007_s42", r: 0.005873 },
+      { label: "random_w00008_s42", r: 0.051962 },
+      { label: "random_w00009_s42", r: 0.003112 },
+      { label: "random_w00010_s42", r: 0.005873 },
+      { label: "random_w00011_s42", r: 0.185676 },
+      { label: "random_w00012_s42", r: 0.005873 },
+      { label: "random_w00013_s42", r: 0.003112 },
+      { label: "random_w00014_s42", r: 0.005873 },
+      { label: "random_w00015_s42", r: 0.003112 },
+      { label: "random_w00016_s42", r: 0.024593 },
+      { label: "random_w00017_s42", r: 0.005873 },
+      { label: "random_w00018_s42", r: 0.005873 },
+      { label: "random_w00019_s42", r: 0.003112 },
+      { label: "random_w00020_s42", r: 0.005873 },
+      { label: "random_w00021_s42", r: 0.005873 },
+      { label: "random_w00022_s42", r: 0.005859 },
+      { label: "random_w00023_s42", r: 0.005873 },
+      { label: "random_w00024_s42", r: 0.005873 },
+      { label: "random_w00025_s42", r: 0.005873 },
+      { label: "random_w00026_s42", r: 0.024756 },
+      { label: "random_w00027_s42", r: 0.924688 },
+      { label: "random_w00028_s42", r: 0.005873 },
+      { label: "random_w00029_s42", r: 0.746444 },
+      { label: "random_w00030_s42", r: 0.003112 },
+      { label: "random_w00031_s42", r: 0.020851 },
+      { label: "random_w00032_s42", r: 0.005873 },
+      { label: "random_w00033_s42", r: 0.005873 },
+      { label: "random_w00034_s42", r: 0.922811 },
+      { label: "random_w00035_s42", r: 0.003112 },
+      { label: "random_w00036_s42", r: 0.232294 },
+      { label: "random_w00037_s42", r: 0.005873 },
+      { label: "random_w00038_s42", r: 0.005873 },
+      { label: "random_w00039_s42", r: 0.005859 },
+      { label: "random_w00040_s42", r: 0.004976 },
+      { label: "random_w00041_s42", r: 0.005873 },
+      { label: "random_w00042_s42", r: 0.054022 },
+      { label: "random_w00043_s42", r: 0.005859 },
+      { label: "random_w00044_s42", r: 0.012239 },
+      { label: "random_w00045_s42", r: 0.005873 },
+      { label: "random_w00046_s42", r: 0.005873 },
+      { label: "random_w00047_s42", r: 0.01198 },
+      { label: "random_w00048_s42", r: 0.180046 },
+      { label: "random_w00049_s42", r: 0.005873 },
+      { label: "random_w00050_s42", r: 0.059258 },
+    ];
+
+    function percentile(sorted, p) {
+      if (!sorted.length) return NaN;
+      if (sorted.length === 1) return sorted[0];
+      const k = (sorted.length - 1) * (p / 100);
+      const f = Math.floor(k), c = Math.ceil(k);
+      if (f === c) return sorted[f];
+      return sorted[f] + (sorted[c] - sorted[f]) * (k - f);
+    }
+
+    function tier(r) {
+      if (r < 0.08) return "#10b981";
+      if (r < 0.35) return "#eab308";
+      if (r < 0.75) return "#3b82f6";
+      return "#a855f7";
+    }
+
+    const randomOnly = ROWS.filter((x) => !x.anchor).map((x) => x.r).sort((a, b) => a - b);
+    const allRatios = ROWS.map((x) => x.r).sort((a, b) => a - b);
+
+    const statsEl = document.getElementById("stats");
+    function block(title, arr) {
+      const s = [...arr].sort((a, b) => a - b);
+      return (
+        "<div class='stat'><b>" +
+        title +
+        "</b><br>n=" +
+        s.length +
+        "<br>min " +
+        s[0].toFixed(4) +
+        "<br>p10 " +
+        percentile(s, 10).toFixed(4) +
+        "<br>p50 " +
+        percentile(s, 50).toFixed(4) +
+        "<br>p90 " +
+        percentile(s, 90).toFixed(4) +
+        "<br>max " +
+        s[s.length - 1].toFixed(4) +
+        "</div>"
+      );
+    }
+    statsEl.innerHTML = block("random_w*（50）", randomOnly) + block("含 anchor（51）", allRatios);
+
+    const sortedRows = [...ROWS].sort((a, b) => a.r - b.r);
+    const maxR = Math.max(...allRatios, 0.001);
+    const chartEl = document.getElementById("sortChart");
+    sortedRows.forEach(function (row) {
+      const w = (row.r / maxR) * 100;
+      const hrow = document.createElement("div");
+      hrow.className = "hrow";
+      hrow.innerHTML =
+        '<div class="lab' +
+        (row.anchor ? " anchor" : "") +
+        '" title="' +
+        row.label +
+        '">' +
+        (row.anchor ? "★ " : "") +
+        row.label +
+        "</div>" +
+        '<div class="track"><div class="fill" style="width:' +
+        w +
+        "%;background:" +
+        tier(row.r) +
+        '"></div></div>' +
+        '<div class="pct">' +
+        (row.r * 100).toFixed(2) +
+        "%</div>";
+      chartEl.appendChild(hrow);
+    });
+
+    const bins = [
+      { lo: 0, hi: 0.05, name: "[0, 5%)" },
+      { lo: 0.05, hi: 0.2, name: "[5%, 20%)" },
+      { lo: 0.2, hi: 0.5, name: "[20%, 50%)" },
+      { lo: 0.5, hi: 0.85, name: "[50%, 85%)" },
+      { lo: 0.85, hi: 1.01, name: "[85%, 100%+]" },
+    ];
+    const histEl = document.getElementById("hist");
+    const maxCount = Math.max(
+      ...bins.map(function (b) {
+        return randomOnly.filter(function (r) {
+          return r >= b.lo && r < b.hi;
+        }).length;
+      }),
+      1
+    );
+    bins.forEach(function (b) {
+      const n = randomOnly.filter(function (r) {
+        return r >= b.lo && r < b.hi;
+      }).length;
+      const hrow = document.createElement("div");
+      hrow.className = "hist-row";
+      hrow.innerHTML =
+        '<div class="hist-lab">' +
+        b.name +
+        '</div><div class="hist-bar"><div class="hist-fill" style="width:' +
+        (maxCount ? (n / maxCount) * 100 : 0) +
+        '%"></div></div><div class="hist-n">' +
+        n +
+        "</div>";
+      histEl.appendChild(hrow);
+    });
+  </script>
+</body>
+</html>

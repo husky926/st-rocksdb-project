@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PKDD ST 剪枝 — bytes_read / data_miss</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, system-ui, sans-serif; margin: 24px; color: #222; }
+    h1 { font-size: 1.25rem; }
+    h2 { font-size: 1rem; margin-top: 28px; color: #444; }
+    .chart { margin: 16px 0 32px; max-width: 720px; }
+    .row { display: flex; align-items: flex-end; gap: 12px; height: 220px; border-bottom: 2px solid #333; padding-left: 8px; }
+    .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+    .bar {
+      width: 44px;
+      min-width: 44px;
+      flex: 0 0 44px;
+      border-radius: 4px 4px 0 0;
+    }
+    .b-full { background: #2563eb; }
+    .b-compact { background: #ea580c; }
+    .lab { font-size: 11px; margin-top: 8px; text-align: center; line-height: 1.3; word-break: break-all; }
+    .val { font-size: 11px; color: #555; margin-top: 4px; }
+    .legend { display: flex; gap: 20px; margin: 12px 0; font-size: 13px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .sq { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+    p.note { font-size: 13px; color: #555; max-width: 720px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>PKDD（Porto）— <code>st_meta_read_bench --no-full-scan</code></h1>
+  <p class="note">来源：<code>data/experiments/validity_sweep_pkdd_e2_two_dbs.tsv</code>。蓝柱 <strong>verify_pkdd_st</strong>（6 SST），橙柱 <strong>verify_pkdd_compact_work</strong>（9×L6）。横轴为四代表窗。</p>
+
+  <h2>图 1 — <code>bytes_read</code>（MB）</h2>
+  <div class="legend">
+    <span><i class="sq" style="background:#2563eb"></i> verify_pkdd_st</span>
+    <span><i class="sq" style="background:#ea580c"></i> verify_pkdd_compact_work</span>
+  </div>
+  <div class="chart" id="c1"></div>
+
+  <h2>图 2 — <code>BLOCK_CACHE_DATA_MISS</code></h2>
+  <div class="chart" id="c2"></div>
+
+  <p class="note"><strong>读图</strong>：东向（lon 在数据包络以东）两库 <strong>bytes</strong> 接近 0；宽窗约 263–296MB。<strong>data_miss</strong> 在东向为 0，宽窗 6–7 万量级。</p>
+
+  <script>
+    const labels = ['wide_baseline', 'east_x_file_disjoint', 'west_x_both_intersect', 'x_near_eastern_boundary'];
+    const shortLab = ['wide', 'east', 'west', 'x_east_edge'];
+    const mbFull = [263.35, 0.93, 1.75, 4.37];
+    const mbCompact = [296.34, 0.00, 0.41, 4.37];
+    const missFull = [60653, 0, 1, 199];
+    const missCompact = [72295, 0, 1, 199];
+
+    function renderChart(elId, fullArr, compactArr, maxY, isMb) {
+      const el = document.getElementById(elId);
+      const row = document.createElement('div');
+      row.className = 'row';
+      for (let i = 0; i < 4; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'bar-wrap';
+        const stack = document.createElement('div');
+        stack.style.cssText = 'display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:8px;height:200px;width:100%;min-height:200px;';
+        const h1 = (fullArr[i] / maxY) * 200;
+        const h2 = (compactArr[i] / maxY) * 200;
+        const b1 = document.createElement('div');
+        b1.className = 'bar b-full';
+        b1.style.height = Math.max(h1, 2) + 'px';
+        const b2 = document.createElement('div');
+        b2.className = 'bar b-compact';
+        b2.style.height = Math.max(h2, 2) + 'px';
+        stack.appendChild(b1);
+        stack.appendChild(b2);
+        const lab = document.createElement('div');
+        lab.className = 'lab';
+        lab.textContent = shortLab[i];
+        const val = document.createElement('div');
+        val.className = 'val';
+        if (isMb) {
+          val.textContent = fullArr[i].toFixed(2) + ' | ' + compactArr[i].toFixed(2) + ' MB';
+        } else {
+          val.textContent = fullArr[i] + ' | ' + compactArr[i];
+        }
+        wrap.appendChild(stack);
+        wrap.appendChild(lab);
+        wrap.appendChild(val);
+        row.appendChild(wrap);
+      }
+      el.appendChild(row);
+    }
+
+    renderChart('c1', mbFull, mbCompact, 310, true);
+    renderChart('c2', missFull, missCompact, 75000, false);
+  </script>
+</body>
+</html>

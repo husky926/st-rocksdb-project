@@ -1,0 +1,46 @@
+# Local datasets, DBs, and experiment outputs (often multi-GB)
+/data/
+
+# Build trees
+**/build/
+**/out/
+**/x64/
+**/Release/
+**/Debug/
+rocks-demo/build/
+
+# Visual Studio / IDE
+.vs/
+*.VC.db
+*.opendb
+*.suo
+*.user
+.idea/
+
+# Compiled artifacts
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# CMake / Ninja
+CMakeFiles/
+cmake_install.cmake
+CMakeCache.txt
+compile_commands.json
+.ninja_*
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS
+Thumbs.db
+Desktop.ini

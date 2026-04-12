@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PKDD — prune / full 基线读盘对比</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 24px; color: #1e293b; max-width: 920px; }
+    h1 { font-size: 1.35rem; margin-bottom: 8px; }
+    h2 { font-size: 1.05rem; margin-top: 32px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; margin-bottom: 20px; line-height: 1.5; }
+    .chart-wrap { margin: 20px 0; }
+    .hrow { display: flex; align-items: center; margin: 8px 0; gap: 10px; }
+    .lab { width: 200px; font-size: 12px; line-height: 1.25; flex-shrink: 0; }
+    .track { flex: 1; height: 22px; background: #f1f5f9; border-radius: 6px; overflow: hidden; position: relative; }
+    .fill { height: 100%; border-radius: 6px; min-width: 3px; transition: width 0.25s; }
+    .fill.lo { background: linear-gradient(90deg, #059669, #10b981); }
+    .fill.mid { background: linear-gradient(90deg, #ca8a04, #eab308); }
+    .fill.hi { background: linear-gradient(90deg, #2563eb, #60a5fa); }
+    .pct { width: 88px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: #475569; }
+    .ref { font-size: 12px; color: #64748b; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #64748b; }
+    .explain { font-size: 14px; line-height: 1.65; color: #334155; }
+    .explain ul { padding-left: 1.25rem; }
+    .explain li { margin: 8px 0; }
+    code { font-size: 12px; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>PKDD：<code>prune_scan</code> 相对「无剪枝全表扫」的读盘比例</h1>
+  <p class="sub">
+    数据：<code>data/experiments/prune_vs_full_pkdd.tsv</code> · 库 <code>verify_pkdd_st</code>（约 484 万 ST keys）·
+    每行一次 <code>st_meta_read_bench</code>：先 <strong>full_scan</strong>（<code>experimental_st_prune_scan</code> 关闭），再 <strong>prune_scan</strong>（开窗）。
+    纵轴为 12 个查询窗；横条长度 = <strong>ratio_bytes = prune_bytes / full_bytes</strong>（越短越好）。
+  </p>
+
+  <div class="chart-wrap" id="chart"></div>
+  <p class="ref">
+    参考：<strong>full_scan</strong> 在本轮中每窗约读 <strong>297.3 MB</strong>（与查询窗无关，扫完整 CF）。横条右测百分比 = prune 相对 full 的读盘比例；
+    <strong>东向</strong>约 <strong>0.31%</strong> 即几乎不读数据块；<strong>宽窗</strong>约 <strong>88.6%</strong> 仍比全表少读约 <strong>11%</strong> 字节。
+  </p>
+
+  <h2>图怎么读 / 说明了什么</h2>
+  <div class="explain">
+    <ul>
+      <li><strong>这条图在比什么</strong>：不是「两个数据库」，而是<strong>同一引擎里两种读法</strong>——
+        先把整表扫一遍要读多少盘（<code>full</code>），再在<strong>同一窗</strong>下走<strong>时空剪枝迭代</strong>要读多少盘（<code>prune</code>）。比值 &lt; 1 表示<strong>剪枝路径读的字节更少</strong>。</li>
+      <li><strong>为什么整根横条几乎一样长的是「全表」</strong>：<code>full_scan</code> 不看你设的窗，<strong>每次都要覆盖整个列族</strong>，所以各窗的 <code>full_bytes_read</code> 都在 ~297MB；差别全在 <code>prune</code> 那一半。</li>
+      <li><strong>颜色</strong>：绿色系表示比例很低（相对全表省盘极多）；黄色为中间；蓝色表示仍接近全表（例如宽窗还要扫大量相交块，但已比全表略省）。</li>
+      <li><strong><code>east_x_file_disjoint</code> 极短条</strong>：窗在数据经度包络以东，文件级/块级大量跳过，<code>prune</code> 只读约 <strong>0.9MB</strong>，相对 ~297MB 全表约 <strong>0.3%</strong>——这是<strong>相对「无剪枝全表」</strong>的硬对比，不是只看「空结果」的错觉。</li>
+      <li><strong><code>wide_baseline</code> 仍约 88.6%</strong>：窗内命中约 <strong>346 万 keys</strong>，与全表 484 万比约 <strong>72%</strong>，但读盘未同比例涨到 100%，说明<strong>即使大窗</strong>仍有一部分块/路径被剪掉；论文可并列 <code>key_selectivity</code> 与 <code>ratio_bytes</code>。</li>
+      <li><strong>未画 <code>block_read_count</code></strong>：剪枝路径上 index 打开次数有时<strong>多于</strong>全表顺序读，<strong>以 <code>bytes_read</code> 为主证据</strong>（见 <code>docs/st_rocksdb_hard_baseline_experiment.md</code>）。</li>
+    </ul>
+  </div>
+
+  <script>
+    const rows = [
+      { label: 'wide_baseline', short: 'wide', r: 0.885771, mbP: 263.617 },
+      { label: 'sharp_spatiotemporal', short: 'sharp', r: 0.714518, mbP: 212.650 },
+      { label: 'east_x_file_disjoint', short: 'east', r: 0.003112, mbP: 0.926 },
+      { label: 'west_x_both_intersect', short: 'west', r: 0.005873, mbP: 1.748 },
+      { label: 'tight_y_band', short: 'tight_y', r: 0.823137, mbP: 244.976 },
+      { label: 'early_t_slice', short: 'early_t', r: 0.741232, mbP: 220.401 },
+      { label: 'mid_t_slice', short: 'mid_t', r: 0.742957, mbP: 221.114 },
+      { label: 'late_t_slice', short: 'late_t', r: 0.122354, mbP: 36.414 },
+      { label: 'south_y_shift', short: 'south_y', r: 0.123162, mbP: 36.655 },
+      { label: 'north_y_shift', short: 'north_y', r: 0.018509, mbP: 5.508 },
+      { label: 'x_near_eastern_boundary', short: 'x_east', r: 0.014672, mbP: 4.367 },
+      { label: 'micro_box', short: 'micro', r: 0.731108, mbP: 217.587 },
+    ];
+    const fullMb = 297.613;
+
+    function tier(r) {
+      if (r < 0.08) return 'lo';
+      if (r < 0.55) return 'mid';
+      return 'hi';
+    }
+
+    const el = document.getElementById('chart');
+    const maxW = 100;
+    rows.forEach(function (row) {
+      const pct = row.r * 100;
+      const w = Math.max(pct, 0.35);
+      const hrow = document.createElement('div');
+      hrow.className = 'hrow';
+      hrow.innerHTML =
+        '<div class="lab" title="' + row.label + '">' + row.short + '</div>' +
+        '<div class="track"><div class="fill ' + tier(row.r) + '" style="width:' + w + '%"></div></div>' +
+        '<div class="pct">' + pct.toFixed(2) + '%<br><span style="font-size:10px;color:#94a3b8">prune≈' + row.mbP.toFixed(2) + 'MB</span></div>';
+      el.appendChild(hrow);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+Label,TMin,TMax,XMin,XMax,YMin,YMax,Note
+wide_baseline,1224600000,1224800000,116.2,116.4,39.9,40.1,bench default; both files INTERSECTS
+sharp_spatiotemporal,1224730000,1224730500,116.31,116.32,39.984,39.986,Record narrow window
+east_x_file_disjoint,1224600000,1224800000,120.0,122.0,39.9,40.1,000011 file DISJOINT
+west_x_both_intersect,1224600000,1224800000,114.0,115.5,39.9,40.1,both SST x-range overlap
+tight_y_band,1224600000,1224800000,116.2,116.4,39.95,39.98,narrow latitude
+early_t_slice,1224000000,1224200000,116.2,116.4,39.9,40.1,earlier 20k sec window
+mid_t_slice,1224700000,1224720000,116.2,116.4,39.9,40.1,2M sec slice mid-range
+late_t_slice,1240000000,1240500000,116.2,116.4,39.9,40.1,later time (still in file t bounds)
+south_y_shift,1224600000,1224800000,116.2,116.4,39.85,39.92,south of baseline y
+north_y_shift,1224600000,1224800000,116.2,116.4,40.05,40.15,north of baseline y
+x_near_119_boundary,1224600000,1224800000,118.8,119.3,39.9,40.1,straddle 000011 x_max ~119.4
+micro_box,1224720000,1224723600,116.28,116.30,39.992,39.996,1h t + small xy

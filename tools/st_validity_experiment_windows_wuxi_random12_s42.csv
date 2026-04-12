@@ -1,0 +1,13 @@
+Label,TMin,TMax,XMin,XMax,YMin,YMax,Note
+random_w01_n12_s42,1596200456,1596201137,93.363912,94.492635,40.467412,43.676221,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w02_n12_s42,1596202233,1596202919,81.745726,84.158838,25.737704,30.49476,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w03_n12_s42,1596202465,1596203129,118.888853,120.049209,35.582194,37.987942,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w04_n12_s42,1596201839,1596202467,80.313036,93.144407,37.855829,46.697226,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w05_n12_s42,1596201731,1596202420,131.05124,138.718036,29.778491,31.727245,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w06_n12_s42,1596201556,1596202167,115.248002,117.8639,37.56102,46.803611,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w07_n12_s42,1596201881,1596202574,98.64987,110.381241,31.280045,41.846685,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w08_n12_s42,1596202574,1596203280,107.459965,120.898065,35.224113,44.616504,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w09_n12_s42,1596202708,1596203313,84.441492,89.778102,26.434305,29.794455,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w10_n12_s42,1596201556,1596202168,99.928895,106.304067,28.880599,35.890713,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w11_n12_s42,1596202745,1596203371,115.546607,121.693727,32.680683,42.863022,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"
+random_w12_n12_s42,1596202187,1596202808,97.177155,112.909245,48.664253,50.696515,"uniform random; n=12 seed=42; envelope_exclude=['early_t_slice', 'late_t_slice', 'mid_t_slice', 'wide_baseline']"

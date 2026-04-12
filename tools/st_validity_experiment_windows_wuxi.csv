@@ -1,0 +1,13 @@
+Label,TMin,TMax,XMin,XMax,YMin,YMax,Note
+wide_baseline,1595030400,1597679999,76.7,133.2,12.1,45.1,wuxi-segment-wide
+sharp_spatiotemporal,1596200000,1596203600,120.0,120.6,31.4,31.95,wuxi-core-tight
+east_x_file_disjoint,1596200000,1596203600,140.0,141.0,50.0,51.0,clearly-disjoint
+west_x_band,1596200000,1596203600,80.0,95.0,28.0,35.0,west-band
+tight_y_band,1596200000,1596203600,119.5,121.0,31.0,31.5,tight-latitude
+early_t_slice,1595030400,1595558799,76.7,133.2,12.1,45.1,early-10days
+mid_t_slice,1595558800,1596341999,76.7,133.2,12.1,45.1,mid-9days
+late_t_slice,1596342000,1597679999,76.7,133.2,12.1,45.1,late-tail
+south_y_shift,1596200000,1596203600,110.0,123.0,20.0,25.0,south-shift
+north_y_shift,1596200000,1596203600,110.0,123.0,40.0,44.0,north-shift
+x_near_eastern_boundary,1596200000,1596203600,132.0,133.2,30.0,40.0,eastern-edge
+micro_box,1596200400,1596200700,120.20,120.22,31.60,31.62,micro-box

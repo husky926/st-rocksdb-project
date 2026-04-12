@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>无锡段对象消融：吞吐、速率与准确性</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 24px; color: #1e293b; max-width: 980px; line-height: 1.55; }
+    h1 { font-size: 1.25rem; margin-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; margin-bottom: 18px; }
+    .fig { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin: 14px 0; }
+    .legend { display:flex; gap:14px; margin-top: 10px; font-size: 12px; color:#475569; flex-wrap:wrap; }
+    .dot { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 6px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+    th:first-child, td:first-child { text-align: left; }
+    code { font-size: 12px; background:#f1f5f9; padding:2px 6px; border-radius:4px; }
+    .ok { color:#065f46; font-weight:700; }
+  </style>
+</head>
+<body>
+  <h1>无锡段对象：严格消融（吞吐 + 速率 + 准确性）</h1>
+  <div class="sub">
+    DB：<code>data/verify_wuxi_segment_full</code>（81768 segments） · 窗口：<code>tools/st_validity_experiment_windows_wuxi.csv</code>（12） ·
+    命令：<code>run_pkdd_large_ablation_window_baseline.ps1 -VerifyKVResults</code> ·
+    TSV：<code>data/experiments/wuxi_segment/*_verifykv.tsv</code>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 380" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="920" height="380" fill="white"/>
+      <line x1="70" y1="310" x2="900" y2="310" stroke="#94a3b8" stroke-width="2"/>
+      <line x1="70" y1="50" x2="70" y2="310" stroke="#94a3b8" stroke-width="2"/>
+      <g font-size="12" fill="#64748b">
+        <text x="60" y="310" text-anchor="end">0</text>
+        <line x1="70" y1="310" x2="900" y2="310" stroke="#e2e8f0"/>
+        <text x="60" y="228" text-anchor="end">60</text>
+        <line x1="70" y1="228" x2="900" y2="228" stroke="#e2e8f0"/>
+        <text x="60" y="146" text-anchor="end">120</text>
+        <line x1="70" y1="146" x2="900" y2="146" stroke="#e2e8f0"/>
+        <text x="60" y="64" text-anchor="end">180</text>
+        <line x1="70" y1="64" x2="900" y2="64" stroke="#e2e8f0"/>
+      </g>
+      <text x="24" y="180" fill="#94a3b8" font-size="11" transform="rotate(-90 24 180)">QPS</text>
+
+      <!-- scale: y = 310 - qps*(246/180) -->
+      <g transform="translate(140,0)">
+        <text x="100" y="36" text-anchor="middle" font-weight="700" fill="#334155">SST+Manifest</text>
+        <rect x="20" y="233.6" width="88" height="76.4" fill="#94a3b8" rx="3"/>
+        <text x="64" y="228" text-anchor="middle" fill="#334155" font-size="12">55.94</text>
+        <rect x="128" y="64.4" width="88" height="245.6" fill="#10b981" rx="3"/>
+        <text x="172" y="58" text-anchor="middle" fill="#0f172a" font-size="12">179.70</text>
+        <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 3.212×</text>
+      </g>
+
+      <g transform="translate(380,0)">
+        <text x="100" y="36" text-anchor="middle" font-weight="700" fill="#334155">SST-only</text>
+        <rect x="20" y="233.4" width="88" height="76.6" fill="#94a3b8" rx="3"/>
+        <text x="64" y="228" text-anchor="middle" fill="#334155" font-size="12">56.08</text>
+        <rect x="128" y="73.2" width="88" height="236.8" fill="#10b981" rx="3"/>
+        <text x="172" y="67" text-anchor="middle" fill="#0f172a" font-size="12">173.19</text>
+        <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 3.088×</text>
+      </g>
+
+      <g transform="translate(620,0)">
+        <text x="100" y="36" text-anchor="middle" font-weight="700" fill="#334155">Manifest-only</text>
+        <rect x="20" y="233.2" width="88" height="76.8" fill="#94a3b8" rx="3"/>
+        <text x="64" y="228" text-anchor="middle" fill="#334155" font-size="12">56.30</text>
+        <rect x="128" y="229.2" width="88" height="80.8" fill="#10b981" rx="3"/>
+        <text x="172" y="223" text-anchor="middle" fill="#0f172a" font-size="12">59.01</text>
+        <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 1.048×</text>
+      </g>
+    </svg>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#94a3b8"></span>full_scan QPS</span>
+      <span><span class="dot" style="background:#10b981"></span>prune QPS</span>
+    </div>
+  </div>
+
+  <div class="fig">
+    <table>
+      <thead>
+        <tr>
+          <th>模式</th>
+          <th>full QPS</th>
+          <th>prune QPS</th>
+          <th>speedup</th>
+          <th>ratio_wall p50 / p90</th>
+          <th>kv_correct</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>SST+Manifest</td><td>55.939</td><td>179.697</td><td>3.212×</td><td>0.2952 / 0.5866</td><td class="ok">12/12 OK</td></tr>
+        <tr><td>SST-only</td><td>56.081</td><td>173.193</td><td>3.088×</td><td>0.3364 / 0.6755</td><td class="ok">12/12 OK</td></tr>
+        <tr><td>Manifest-only</td><td>56.296</td><td>59.008</td><td>1.048×</td><td>0.9658 / 0.9934</td><td class="ok">12/12 OK</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:12px;color:#64748b;margin-top:8px;">
+      准确性口径：<code>--verify-kv-results</code> 对每窗比较 full vs prune 的窗内 <code>(user_key,value)</code> 多重集合。
+    </p>
+  </div>
+</body>
+</html>
+

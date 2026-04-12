@@ -1,0 +1,26 @@
+Label,TMin,TMax,XMin,XMax,YMin,YMax,Note
+
+wide_baseline,1372637000,1374000000,-8.72,-8.52,41.08,41.22,Porto core band; time covers bulk of subset
+
+sharp_spatiotemporal,1372700000,1372700800,-8.62,-8.60,41.14,41.145,narrow t + small lon/lat
+
+east_x_file_disjoint,1372637000,1374000000,-4.5,-3.5,41.0,41.25,east of data max lon ~-6.96 -> file-level DISJOINT expected
+
+west_x_both_intersect,1372637000,1374000000,-11.5,-10.0,40.5,42.5,western lon band overlapping outliers + core
+
+tight_y_band,1372637000,1374000000,-8.72,-8.52,41.10,41.12,narrow latitude
+
+early_t_slice,1372636853,1372850000,-8.72,-8.52,41.08,41.22,early epoch in subset
+
+mid_t_slice,1373400000,1373600000,-8.72,-8.52,41.08,41.22,mid time slice
+
+late_t_slice,1374300000,1374483494,-8.72,-8.52,41.08,41.22,late epoch to max t in subset
+
+south_y_shift,1372637000,1374000000,-8.72,-8.52,40.2,40.5,south of core lat
+
+north_y_shift,1372637000,1374000000,-8.72,-8.52,42.0,42.3,north of core lat
+
+x_near_eastern_boundary,1372637000,1374000000,-7.15,-6.98,41.0,41.22,straddle eastern lon edge (analog x_near_119)
+
+micro_box,1372700000,1372703600,-8.65,-8.63,41.15,41.16,1h t + small xy
+

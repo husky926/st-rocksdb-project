@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PKDD 大规模（~14.29M keys）— prune / full 对比</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 24px; color: #1e293b; max-width: 960px; }
+    h1 { font-size: 1.25rem; margin-bottom: 8px; }
+    h2 { font-size: 1.05rem; margin-top: 28px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; margin-bottom: 16px; line-height: 1.55; }
+    .hrow { display: flex; align-items: center; margin: 7px 0; gap: 10px; }
+    .lab { width: 200px; font-size: 12px; line-height: 1.25; flex-shrink: 0; }
+    .track { flex: 1; height: 22px; background: #f1f5f9; border-radius: 6px; overflow: hidden; position: relative; }
+    .fill { height: 100%; border-radius: 6px; min-width: 3px; }
+    .fill.lo { background: linear-gradient(90deg, #059669, #10b981); }
+    .fill.mid { background: linear-gradient(90deg, #ca8a04, #eab308); }
+    .fill.hi { background: linear-gradient(90deg, #2563eb, #60a5fa); }
+    .pct { width: 100px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: #475569; line-height: 1.3; }
+    .ref { font-size: 12px; color: #64748b; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #64748b; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 14px 0; }
+    .stat { background: #f8fafc; border-radius: 8px; padding: 10px 12px; font-size: 12px; border: 1px solid #e2e8f0; }
+    .stat b { color: #0f172a; }
+    .lab.anchor { font-weight: 700; color: #7c3aed; }
+    .hist-row { display: flex; align-items: center; margin: 4px 0; gap: 8px; font-size: 12px; }
+    .hist-lab { width: 130px; color: #64748b; }
+    .hist-bar { flex: 1; height: 18px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+    .hist-fill { height: 100%; background: #3b82f6; border-radius: 4px; }
+    .hist-n { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+    code { font-size: 12px; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>PKDD 大规模：<code>verify_pkdd_st_large</code>（~14.29M ST keys）</h1>
+  <p class="sub">
+    数据子集：<strong>300k</strong> 轨迹 / <code>data/processed/pkdd_large</code> ·
+    Phase A TSV：<code>prune_vs_full_pkdd_large_design_windows.tsv</code>、
+    <code>prune_vs_full_pkdd_large_random_n25_s43.tsv</code> ·
+    每窗一次 <code>st_meta_read_bench</code>：<strong>baseline</strong>（默认 <code>--full-scan-mode window</code>：全 CF 迭代，<strong>full_keys</strong>=窗内 ST 点数；<strong>full_keys_scanned_total</strong>≈14.29M）再 <strong>prune_scan</strong>。
+    <strong>full_bytes_read</strong> ≈ <strong>877.7 MB</strong>/窗（<strong>full_wall_us</strong> ≈ 2.5–2.7s 量级，视缓存而定）。
+    下图数据与最近一次写入 TSV 对齐（见内嵌 <code>DESIGN</code>）。
+  </p>
+
+  <h2>图 0 — 12 设计窗：<code>ratio_bytes</code>（绿）与 <code>ratio_wall</code>（蓝）</h2>
+  <p class="sub" style="margin-top:-4px">横轴为窗简称，按 <code>ratio_bytes</code> 升序排列；柱高 = 比值本身（0–1）。</p>
+  <div id="designDualSvg"></div>
+
+  <h2>图 1 — 12 设计窗：<code>ratio_bytes</code>（按比值升序）</h2>
+  <div id="designBytes"></div>
+  <p class="ref">
+    <strong>ratio_bytes</strong> = prune 读盘 / full 读盘（越短越好）。<strong>east_x_file_disjoint</strong> 为 <strong>0</strong>（条上显示极小占位）。
+  </p>
+
+  <h2>图 2 — 同一批窗：<code>ratio_wall</code>（墙钟 prune/full）</h2>
+  <div id="designWall"></div>
+  <p class="ref">
+    <strong>ratio_wall</strong> = <code>prune_wall_us / full_wall_us</code>。与图 1 排序一致，便于对照「读盘」与「墙钟」是否同向（块读次数等可不同步，见硬对比文档）。
+  </p>
+
+  <h2>图 3 — 随机 25 窗 + 锚点：<code>ratio_bytes</code> 升序</h2>
+  <div class="stats" id="randStats"></div>
+  <div id="randChart"></div>
+
+  <h2>图 4 — 仅 random_w*：<code>ratio_bytes</code> 分桶</h2>
+  <div id="randHist"></div>
+
+  <p class="ref">
+    重跑实验后请用 TSV 更新本页内嵌的 <code>DESIGN_*</code> / <code>RANDOM_ROWS</code>，或写脚本生成。
+    小库图表：<a href="st_prune_vs_full_pkdd_charts.html">st_prune_vs_full_pkdd_charts.html</a>、
+    <a href="st_prune_vs_full_random_n50_s42_charts.html">st_prune_vs_full_random_n50_s42_charts.html</a>。
+  </p>
+
+  <script>
+    const FULL_BYTES = 877665548;
+    const fullMb = FULL_BYTES / 1e6;
+
+    // Source: prune_vs_full_pkdd_large_design_windows.tsv (Phase A sweep, PruneMode=sst_manifest)
+    const DESIGN = [
+      { label: 'wide_baseline', short: 'wide', rb: 0.533456, rw: 0.3509, pb: 468196188 },
+      { label: 'sharp_spatiotemporal', short: 'sharp', rb: 0.281814, rw: 0.1235, pb: 247338107 },
+      { label: 'east_x_file_disjoint', short: 'east', rb: 0, rw: 0.000004765, pb: 0 },
+      { label: 'west_x_both_intersect', short: 'west', rb: 0.002795, rw: 0.0009583, pb: 2452751 },
+      { label: 'tight_y_band', short: 'tight_y', rb: 0.463374, rw: 0.1714, pb: 406687129 },
+      { label: 'early_t_slice', short: 'early_t', rb: 0.380913, rw: 0.1900, pb: 334313902 },
+      { label: 'mid_t_slice', short: 'mid_t', rb: 0.499035, rw: 0.2097, pb: 437986067 },
+      { label: 'late_t_slice', short: 'late_t', rb: 0.588037, rw: 0.2216, pb: 516099941 },
+      { label: 'south_y_shift', short: 'south_y', rb: 0.077411, rw: 0.0392, pb: 67940557 },
+      { label: 'north_y_shift', short: 'north_y', rb: 0.015616, rw: 0.0080, pb: 13705268 },
+      { label: 'x_near_eastern_boundary', short: 'x_east', rb: 0.013673, rw: 0.005744, pb: 12000252 },
+      { label: 'micro_box', short: 'micro', rb: 0.292027, rw: 0.1317, pb: 256301677 },
+    ];
+
+    const RANDOM_ROWS = [
+      { label: 'wide_baseline_anchor', rb: 0.533456, rw: 0.3803, anchor: true },
+      { label: 'random_w00001_s43', rb: 0.000925, rw: 0.0004 },
+      { label: 'random_w00002_s43', rb: 0.001859, rw: 0.0008 },
+      { label: 'random_w00003_s43', rb: 0.513035, rw: 0.3534 },
+      { label: 'random_w00004_s43', rb: 0.001859, rw: 0.0007 },
+      { label: 'random_w00005_s43', rb: 0.024513, rw: 0.0122 },
+      { label: 'random_w00006_s43', rb: 0.00279, rw: 0.0013 },
+      { label: 'random_w00007_s43', rb: 0.001859, rw: 0.0007 },
+      { label: 'random_w00008_s43', rb: 0.000925, rw: 0.0004 },
+      { label: 'random_w00009_s43', rb: 0.00093, rw: 0.0009 },
+      { label: 'random_w00010_s43', rb: 0.000925, rw: 0.0004 },
+      { label: 'random_w00011_s43', rb: 0.00093, rw: 0.0004 },
+      { label: 'random_w00012_s43', rb: 0.65172, rw: 0.2262 },
+      { label: 'random_w00013_s43', rb: 0.001859, rw: 0.0014 },
+      { label: 'random_w00014_s43', rb: 0.001859, rw: 0.0009 },
+      { label: 'random_w00015_s43', rb: 0.001855, rw: 0.0007 },
+      { label: 'random_w00016_s43', rb: 0.001855, rw: 0.0010 },
+      { label: 'random_w00017_s43', rb: 0.00093, rw: 0.0003 },
+      { label: 'random_w00018_s43', rb: 0.001859, rw: 0.0006 },
+      { label: 'random_w00019_s43', rb: 0.00093, rw: 0.0004 },
+      { label: 'random_w00020_s43', rb: 0.010041, rw: 0.0037 },
+      { label: 'random_w00021_s43', rb: 0.001859, rw: 0.0010 },
+      { label: 'random_w00022_s43', rb: 0.001855, rw: 0.0006 },
+      { label: 'random_w00023_s43', rb: 0.542113, rw: 0.2388 },
+      { label: 'random_w00024_s43', rb: 0.001859, rw: 0.0011 },
+      { label: 'random_w00025_s43', rb: 0.00279, rw: 0.0010 },
+    ];
+
+    function tierBytes(r) {
+      if (r < 0.08) return 'lo';
+      if (r < 0.55) return 'mid';
+      return 'hi';
+    }
+    function tierWall(r) {
+      if (r < 0.05) return 'lo';
+      if (r < 0.25) return 'mid';
+      return 'hi';
+    }
+
+    function renderBarChart(containerId, rows, key, tierFn, labelSuffix) {
+      const sorted = rows.slice().sort(function (a, b) { return a[key] - b[key]; });
+      const el = document.getElementById(containerId);
+      const maxR = Math.max.apply(null, sorted.map(function (r) { return r[key]; }), 1e-6);
+      sorted.forEach(function (row) {
+        const r = row[key];
+        const pct = r * 100;
+        const w = Math.max(pct, r === 0 ? 0.35 : 0.35);
+        const mbP = row.pb !== undefined ? row.pb / 1e6 : null;
+        const hrow = document.createElement('div');
+        hrow.className = 'hrow';
+        const extra = mbP !== null
+          ? '<br><span style="font-size:10px;color:#94a3b8">prune≈' + mbP.toFixed(1) + 'MB</span>'
+          : '<br><span style="font-size:10px;color:#94a3b8">wall比</span>';
+        hrow.innerHTML =
+          '<div class="lab" title="' + row.label + '">' + row.short + '</div>' +
+          '<div class="track"><div class="fill ' + tierFn(r) + '" style="width:' + Math.min(w, 100) + '%"></div></div>' +
+          '<div class="pct">' + pct.toFixed(2) + '%' + extra + '</div>';
+        el.appendChild(hrow);
+      });
+    }
+
+    (function renderDualSvg() {
+      const sorted = DESIGN.slice().sort(function (a, b) { return a.rb - b.rb; });
+      const W = 920, H = 300, left = 48, right = 12, top = 28, bottom = 86;
+      const plotW = W - left - right, plotH = H - top - bottom;
+      const n = sorted.length;
+      const gap = 3;
+      const groupW = plotW / n;
+      const barW = Math.max(4, (groupW - gap) / 2 - 1);
+      let svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:920px;display:block;">';
+      svg += '<text x="' + left + '" y="18" font-size="12" fill="#334155">设计窗 Phase A（PKDD ~14.29M keys）</text>';
+      svg += '<line x1="' + left + '" y1="' + (top + plotH) + '" x2="' + (left + plotW) + '" y2="' + (top + plotH) + '" stroke="#cbd5e1"/>';
+      for (let i = 0; i < n; i++) {
+        const d = sorted[i];
+        const x0 = left + i * groupW + gap / 2;
+        const hb = plotH * Math.min(1, d.rb);
+        const hw = plotH * Math.min(1, d.rw);
+        svg += '<rect x="' + x0 + '" y="' + (top + plotH - hb) + '" width="' + barW + '" height="' + Math.max(hb, 0.5) + '" fill="#059669" opacity="0.88" rx="2"/>';
+        svg += '<rect x="' + (x0 + barW + 1) + '" y="' + (top + plotH - hw) + '" width="' + barW + '" height="' + Math.max(hw, 0.3) + '" fill="#2563eb" opacity="0.88" rx="2"/>';
+        svg += '<text x="' + (x0 + groupW / 2) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="8.5" fill="#64748b">' + d.short + '</text>';
+      }
+      svg += '<text x="' + (left + plotW - 100) + '" y="' + (top + 14) + '" font-size="11" fill="#059669">■ ratio_bytes</text>';
+      svg += '<text x="' + (left + plotW - 100) + '" y="' + (top + 28) + '" font-size="11" fill="#2563eb">■ ratio_wall</text>';
+      svg += '</svg>';
+      document.getElementById('designDualSvg').innerHTML = svg;
+    })();
+
+    const designBytes = DESIGN.map(function (d) {
+      return { label: d.label, short: d.short, rb: d.rb, rw: d.rw, pb: d.pb };
+    });
+    renderBarChart('designBytes', designBytes, 'rb', tierBytes, '');
+
+    const designWall = DESIGN.map(function (d) {
+      return { label: d.label, short: d.short, rb: d.rw, rw: d.rw, pb: null };
+    });
+    renderBarChart('designWall', designWall, 'rb', tierWall, '');
+
+    function percentile(sorted, p) {
+      if (!sorted.length) return NaN;
+      if (sorted.length === 1) return sorted[0];
+      const k = (sorted.length - 1) * (p / 100);
+      const f = Math.floor(k), c = Math.ceil(k);
+      if (f === c) return sorted[f];
+      return sorted[f] + (sorted[c] - sorted[f]) * (k - f);
+    }
+
+    const randomOnly = RANDOM_ROWS.filter(function (r) { return !r.anchor; }).map(function (r) { return r.rb; }).sort(function (a, b) { return a - b; });
+    const statsEl = document.getElementById('randStats');
+    [['random n=25 ratio_bytes', randomOnly]].forEach(function (pair) {
+      const v = pair[1];
+      const div = document.createElement('div');
+      div.className = 'stat';
+      div.innerHTML = '<b>' + pair[0] + '</b><br>min ' + v[0].toFixed(4) + ' · p50 ' + percentile(v, 50).toFixed(4) +
+        ' · p90 ' + percentile(v, 90).toFixed(4) + ' · max ' + v[v.length - 1].toFixed(4);
+      statsEl.appendChild(div);
+    });
+    const rwOnly = RANDOM_ROWS.filter(function (r) { return !r.anchor; }).map(function (r) { return r.rw; }).sort(function (a, b) { return a - b; });
+    const div2 = document.createElement('div');
+    div2.className = 'stat';
+    div2.innerHTML = '<b>random ratio_wall</b><br>min ' + rwOnly[0].toFixed(4) + ' · p50 ' + percentile(rwOnly, 50).toFixed(4) +
+      ' · p90 ' + percentile(rwOnly, 90).toFixed(4) + ' · max ' + rwOnly[rwOnly.length - 1].toFixed(4);
+    statsEl.appendChild(div2);
+
+    const randSorted = RANDOM_ROWS.slice().sort(function (a, b) { return a.rb - b.rb; });
+    const randEl = document.getElementById('randChart');
+    randSorted.forEach(function (row) {
+      const pct = row.rb * 100;
+      const w = Math.max(pct, 0.35);
+      const hrow = document.createElement('div');
+      hrow.className = 'hrow';
+      hrow.innerHTML =
+        '<div class="lab' + (row.anchor ? ' anchor' : '') + '" title="' + row.label + '">' +
+        (row.anchor ? '★ ' : '') + row.label + '</div>' +
+        '<div class="track"><div class="fill ' + tierBytes(row.rb) + '" style="width:' + Math.min(w, 100) + '%"></div></div>' +
+        '<div class="pct">' + pct.toFixed(2) + '%</div>';
+      randEl.appendChild(hrow);
+    });
+
+    const buckets = [
+      { max: 0.01, lab: '[0, 0.01)' },
+      { max: 0.05, lab: '[0.01, 0.05)' },
+      { max: 0.2, lab: '[0.05, 0.2)' },
+      { max: 0.5, lab: '[0.2, 0.5)' },
+      { max: 0.7, lab: '[0.5, 0.7)' },
+      { max: 2, lab: '[0.7, 1]' },
+    ];
+    const counts = buckets.map(function () { return 0; });
+    randomOnly.forEach(function (rb) {
+      for (let i = 0; i < buckets.length; i++) {
+        const hi = buckets[i].max;
+        const lo = i === 0 ? 0 : buckets[i - 1].max;
+        if (rb >= lo && (i === buckets.length - 1 ? rb <= hi : rb < hi)) {
+          counts[i]++;
+          break;
+        }
+      }
+    });
+    const maxC = Math.max.apply(null, counts, 1);
+    const histEl = document.getElementById('randHist');
+    buckets.forEach(function (b, i) {
+      const n = counts[i];
+      const row = document.createElement('div');
+      row.className = 'hist-row';
+      row.innerHTML =
+        '<div class="hist-lab">' + b.lab + '</div>' +
+        '<div class="hist-bar"><div class="hist-fill" style="width:' + (maxC ? (100 * n / maxC) : 0) + '%"></div></div>' +
+        '<div class="hist-n">' + n + '</div>';
+      histEl.appendChild(row);
+    });
+  </script>
+</body>
+</html>

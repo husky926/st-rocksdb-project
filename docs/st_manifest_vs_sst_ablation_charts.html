@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Manifest vs SST 消融 — 示意图与往期数字</title>
+  <style>
+    body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; margin: 24px; color: #1e293b; max-width: 920px; line-height: 1.55; }
+    h1 { font-size: 1.3rem; margin-bottom: 8px; }
+    h2 { font-size: 1.05rem; margin-top: 36px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+    .fig { margin: 20px 0; padding: 16px; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; }
+    .fig svg { display: block; max-width: 100%; height: auto; }
+    .cap { font-size: 12px; color: #64748b; margin-top: 10px; }
+    .hrow { display: flex; align-items: center; margin: 8px 0; gap: 10px; font-size: 13px; }
+    .lab { width: 220px; flex-shrink: 0; color: #475569; }
+    .track { flex: 1; height: 28px; background: #e2e8f0; border-radius: 6px; overflow: hidden; display: flex; }
+    .seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 600; }
+    .seg.skip { background: #059669; }
+    .seg.keep { background: #3b82f6; }
+    .seg.full { background: #94a3b8; }
+    .val { width: 72px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: #64748b; }
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 12px; color: #475569; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+    code { font-size: 11px; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+    a { color: #2563eb; }
+  </style>
+</head>
+<body>
+  <h1>Manifest 与 SST：分层示意图 + 往期消融数字（浏览器图）</h1>
+  <p class="sub">
+    配套文档：<a href="st_manifest_vs_sst_ablation_evidence.md">st_manifest_vs_sst_ablation_evidence.md</a> ·
+    数字来源：<strong>Record.md</strong>；图 8 为 PKDD 14.29M <strong>window baseline</strong> 消融重跑（<code>prune_vs_full_pkdd_large_ablation_*_window.tsv</code>）。
+  </p>
+
+  <h2>图 1 — 三层剪枝各自落在哪里</h2>
+  <div class="fig">
+    <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">
+      <text x="12" y="28" font-weight="700" fill="#0f172a">查询窗（时间 + 经纬矩形）</text>
+      <rect x="12" y="38" width="200" height="36" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+      <text x="112" y="60" text-anchor="middle" fill="#92400e" font-size="12">ReadOptions::experimental_st_prune_scan</text>
+
+      <!-- L1 -->
+      <rect x="12" y="100" width="696" height="72" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+      <text x="24" y="122" font-weight="700" fill="#5b21b6">L1 文件级（Manifest / Version）</text>
+      <text x="24" y="142" fill="#6d28d9" font-size="12">FileMetaData::st_file_meta · LevelIterator：整文件时空包络与窗不相交 → 不 OpenTable</text>
+      <text x="24" y="162" fill="#7c3aed" font-size="11">持久化：MANIFEST custom tag；与 SST 表属性 st_file_bounds 语义一致</text>
+
+      <!-- L2 -->
+      <rect x="12" y="188" width="696" height="56" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+      <text x="24" y="210" font-weight="700" fill="#1e40af">L2 块级（SST 主索引尾）</text>
+      <text x="24" y="230" fill="#1d4ed8" font-size="12">已打开的 SST：索引项上块 MBR+时间尾 → 整块 data block 不相交则跳过</text>
+
+      <!-- L3 -->
+      <rect x="12" y="256" width="696" height="52" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+      <text x="24" y="278" font-weight="700" fill="#065f46">L3 块内键级（仍在 SST 内）</text>
+      <text x="24" y="296" fill="#047857" font-size="12">块 MBR 仍相交时：按 user key 解码 (t,x,y) 过滤窗外键 → 主要影响枚举键数 / CPU</text>
+    </svg>
+    <p class="cap">说明：三者由同一开关开启；「分开证明」靠 <strong>diag 的 INTERSECTS/DISJOINT</strong> + 不同查询窗几何，见配套 md。</p>
+  </div>
+
+  <h2>图 2 — 两种几何情形（读路径差异，示意）</h2>
+  <div class="fig">
+    <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">
+      <text x="12" y="22" font-weight="700" fill="#0f172a">左：文件级全 INTERSECTS（例：Geolife 西向窗）— SST 块级扛活</text>
+      <rect x="12" y="32" width="90" height="40" rx="4" fill="#93c5fd" stroke="#2563eb"/>
+      <text x="57" y="56" text-anchor="middle" fill="#1e3a8a" font-size="11">SST A</text>
+      <rect x="108" y="32" width="90" height="40" rx="4" fill="#93c5fd" stroke="#2563eb"/>
+      <text x="153" y="56" text-anchor="middle" fill="#1e3a8a" font-size="11">SST B</text>
+      <text x="220" y="56" fill="#64748b">均须 OpenTable → 块级大量 skip data block → bytes 仍降</text>
+
+      <text x="12" y="118" font-weight="700" fill="#0f172a">右：存在文件级 DISJOINT（例：PKDD 东向窗）— Manifest 级可整文件跳过</text>
+      <rect x="12" y="128" width="90" height="40" rx="4" fill="#e2e8f0" stroke="#94a3b8" stroke-dasharray="6 4"/>
+      <text x="57" y="152" text-anchor="middle" fill="#64748b" font-size="11">SST ×</text>
+      <text x="105" y="152" fill="#059669" font-size="11">不打开</text>
+      <rect x="180" y="128" width="90" height="40" rx="4" fill="#e2e8f0" stroke="#94a3b8" stroke-dasharray="6 4"/>
+      <text x="225" y="152" text-anchor="middle" fill="#64748b" font-size="11">…</text>
+      <text x="285" y="152" fill="#059669" font-size="11">全部 DISJOINT → 接近 0 IO</text>
+
+      <text x="12" y="200" font-weight="700" fill="#0f172a">演示脚本：一文件 DISJOINT、一文件相交（st_manifest_disjoint_demo）</text>
+      <rect x="12" y="210" width="100" height="44" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+      <text x="62" y="230" text-anchor="middle" fill="#1e40af" font-size="11">000009</text>
+      <text x="62" y="246" text-anchor="middle" fill="#1e40af" font-size="10">INTERSECTS</text>
+      <rect x="128" y="210" width="100" height="44" rx="4" fill="#e2e8f0" stroke="#64748b" stroke-dasharray="5 3"/>
+      <text x="178" y="230" text-anchor="middle" fill="#64748b" font-size="11">000011</text>
+      <text x="178" y="246" text-anchor="middle" fill="#64748b" font-size="10">DISJOINT 跳过</text>
+      <text x="250" y="235" fill="#334155">prune 只走相交文件内块级 + 键级 → keys≈1、bytes≈55MB（Record）</text>
+    </svg>
+    <p class="cap">左列强调「<strong>没整文件跳过</strong>仍有收益」= SST 块级；右列强调「<strong>整文件不进路径</strong>」= 文件级 + Manifest 元数据。</p>
+  </div>
+
+  <h2>图 3 — Geolife <code>verify_traj_st_full</code>：西向窗 vs 宽窗（prune 路径读盘，约值）</h2>
+  <div class="fig">
+    <p style="margin:0 0 12px; font-size:13px; color:#475569;">两文件 diag 均为 <strong>INTERSECTS</strong>；收益来自 <strong>块级 skip</strong>（000009 内 skip 11670 / keep 1777 等，见 Record）。</p>
+    <div class="hrow">
+      <div class="lab">宽窗 prune <code>bytes_read</code></div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg full" style="width:100%">≈78.7 MB</div></div>
+      <div class="val">100%</div>
+    </div>
+    <div class="hrow">
+      <div class="lab">西向窗 prune</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:40.5%">≈32 MB</div></div>
+      <div class="val">~41%</div>
+    </div>
+    <div class="legend">
+      <span><span class="dot" style="background:#94a3b8"></span>宽窗（参照）</span>
+      <span><span class="dot" style="background:#059669"></span>西向（块级主导）</span>
+    </div>
+    <p class="cap">32/78.7 为 Record 叙述量级；精确数以当时 TSV/日志为准。</p>
+  </div>
+
+  <h2>图 4 — Geolife：近 119° 边界窗 vs 宽窗（prune 读盘，约值）</h2>
+  <div class="fig">
+    <div class="hrow">
+      <div class="lab">宽窗</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg full" style="width:100%">≈78.7 MB</div></div>
+      <div class="val">100%</div>
+    </div>
+    <div class="hrow">
+      <div class="lab">x_near_119</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:69.9%">≈55 MB</div></div>
+      <div class="val">~70%</div>
+    </div>
+    <p class="cap">文件级仍全 INTERSECTS；000011 上块级 skip 5746 / keep 1 等（Record）。</p>
+  </div>
+
+  <h2>图 5 — 西向窗：单 SST 内块级 skip / keep（000009，示意比例）</h2>
+  <div class="fig">
+    <div class="hrow">
+      <div class="lab">000009 data blocks</div>
+      <div class="track" style="flex:1; max-width:480px;">
+        <div class="seg skip" style="width:86.8%">skip 11670</div>
+        <div class="seg keep" style="width:13.2%">keep 1777</div>
+      </div>
+    </div>
+    <div class="hrow">
+      <div class="lab">000011（同窗）</div>
+      <div class="track" style="flex:1; max-width:480px;">
+        <div class="seg skip" style="width:0%"></div>
+        <div class="seg keep" style="width:100%">keep 5747</div>
+      </div>
+    </div>
+    <p class="cap">条形长度为块数比例（11670+1777，5747）；与 <code>st_meta_sst_diag --window</code> 西向参数一致。</p>
+  </div>
+
+  <h2>图 6 — PKDD 东向窗：Phase A <code>ratio_bytes</code>（14.29M 库，设计窗）</h2>
+  <div class="fig">
+    <div class="hrow">
+      <div class="lab"><code>east_x_file_disjoint</code></div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:2%; min-width:4px;">≈0</div></div>
+      <div class="val">~0%</div>
+    </div>
+    <div class="hrow">
+      <div class="lab"><code>wide_baseline</code>（对照）</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg keep" style="width:53.3%">prune/full bytes</div></div>
+      <div class="val">~53%</div>
+    </div>
+    <p class="cap">东向：全库文件与窗文件级 DISJOINT → 文件级跳过主导；宽窗：仍有大量相交 → 比值约半（见 <code>prune_vs_full_pkdd_large_design_windows.tsv</code>）。</p>
+  </div>
+
+  <h2>图 7 — L3 块内键过滤：宽窗 <code>prune_scan keys</code>（Geolife，数量级）</h2>
+  <div class="fig">
+    <p style="margin:0 0 8px; font-size:13px;">块级-only 时代与启用 <strong>FindKeyForward</strong> 后（Record）；<strong>bytes_read 可不变</strong>。</p>
+    <div class="hrow">
+      <div class="lab">仅块级（约）</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg full" style="width:100%">1 279 138 keys</div></div>
+    </div>
+    <div class="hrow">
+      <div class="lab">+ 块内键过滤</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:0.3%; min-width:8px;">3 803</div></div>
+      <div class="val">0.03%</div>
+    </div>
+    <p class="cap">右条按「占 1279138 的比例」显示宽度（故极短）；强调 <strong>键数暴跌 ≠ 读盘同比例暴跌</strong>。</p>
+  </div>
+
+  <h2>图 8 — PKDD 14.29M：严格消融（window baseline，吞吐示意）</h2>
+  <div class="fig">
+    <p style="margin:0 0 12px; font-size:13px; color:#475569;">
+      Baseline：<code>st_meta_read_bench --full-scan-mode window</code>（12 设计窗）。QPS = 12 / Σ<code>wall_us</code>（单次进程内 full 再 prune）。
+    </p>
+    <div class="hrow">
+      <div class="lab">SST+Manifest · full QPS</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg full" style="width:100%">0.347</div></div>
+      <div class="val">QPS</div>
+    </div>
+    <div class="hrow">
+      <div class="lab">SST+Manifest · prune QPS</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:100%">2.869</div></div>
+      <div class="val">~8.3×</div>
+    </div>
+    <div class="hrow">
+      <div class="lab">SST only · prune QPS</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg skip" style="width:87.7%">2.546</div></div>
+      <div class="val">speedup ~7.2×</div>
+    </div>
+    <div class="hrow">
+      <div class="lab">Manifest only · prune QPS</div>
+      <div class="track" style="flex:1; max-width:420px;"><div class="seg keep" style="width:13.5%">0.387</div></div>
+      <div class="val">~1.05×</div>
+    </div>
+    <p class="cap">数值来自 <code>summarize_prune_modules_throughput.py</code>（Record 2026-04-07 window 重跑）。Manifest-only 行仍以「相对 full 略快」为主，与 SST 侧主导叙事一致。</p>
+  </div>
+
+  <p class="sub" style="margin-top:40px;">
+    维护：若 Record 数字更新，请同步修改本页内嵌数值；或改为由脚本从 TSV 生成。
+  </p>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Manifest vs SST 消融：吞吐与加速比（window baseline）</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 24px; color: #1e293b; max-width: 980px; line-height: 1.55; }
+    h1 { font-size: 1.25rem; margin-bottom: 6px; }
+    .sub { font-size: 13px; color: #64748b; margin-bottom: 18px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .fig { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; }
+    .k { font-size: 12px; color: #475569; }
+    .legend { display:flex; gap:14px; margin-top: 10px; font-size: 12px; color:#475569; flex-wrap:wrap; }
+    .dot { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+    code { font-size: 12px; background:#f1f5f9; padding:2px 6px; border-radius:4px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 6px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+    th:first-child, td:first-child { text-align: left; }
+    .note { margin-top: 10px; font-size: 12px; color:#64748b; }
+  </style>
+</head>
+<body>
+  <h1>严格消融图：12 窗 workload 的真实吞吐（QPS）</h1>
+  <div class="sub">
+    数据集：PKDD <strong>~14.29M</strong> keys（300k segments）· DB：<code>verify_pkdd_st_large</code> ·
+    基线：<code>st_meta_read_bench --full-scan-mode window</code>（与 prune <strong>同一几何窗</strong>；<code>full_keys</code>=窗内点数）·
+    吞吐：<code>QPS = 12 / (Σ wall_us / 1e6)</code>（每窗一次 full 再 prune，见 <code>summarize_prune_modules_throughput.py</code>）·
+    TSV：<code>data/experiments/prune_vs_full_pkdd_large_ablation_*_window.tsv</code>（Record 2026-04-07）
+  </div>
+
+  <div class="grid">
+    <div class="fig">
+      <div class="k">图：每个模块的 QPS（full baseline vs prune-mode）与加速比（speedup）</div>
+      <!-- Y 轴 0–3.2 QPS；柱高 = v/3.2*260 px，底边 y=310 -->
+      <svg viewBox="0 0 920 380" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0" y="0" width="920" height="380" fill="white"/>
+
+        <line x1="70" y1="310" x2="900" y2="310" stroke="#94a3b8" stroke-width="2"/>
+        <line x1="70" y1="50" x2="70" y2="310" stroke="#94a3b8" stroke-width="2"/>
+
+        <g font-size="12" fill="#64748b">
+          <text x="60" y="310" text-anchor="end">0.0</text>
+          <line x1="70" y1="310" x2="900" y2="310" stroke="#e2e8f0"/>
+          <text x="60" y="229" text-anchor="end">1.0</text>
+          <line x1="70" y1="229" x2="900" y2="229" stroke="#e2e8f0"/>
+          <text x="60" y="148" text-anchor="end">2.0</text>
+          <line x1="70" y1="148" x2="900" y2="148" stroke="#e2e8f0"/>
+          <text x="60" y="67" text-anchor="end">3.0</text>
+          <line x1="70" y1="67" x2="900" y2="67" stroke="#e2e8f0"/>
+        </g>
+        <text x="24" y="180" fill="#94a3b8" font-size="11" transform="rotate(-90 24 180)">QPS</text>
+
+        <defs>
+          <linearGradient id="gFull" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#94a3b8"/>
+            <stop offset="100%" stop-color="#64748b"/>
+          </linearGradient>
+          <linearGradient id="gPrune" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#059669"/>
+            <stop offset="100%" stop-color="#10b981"/>
+          </linearGradient>
+        </defs>
+
+        <!-- SST+Manifest: full 0.347, prune 2.869, speedup 8.258x -->
+        <g transform="translate(140,0)">
+          <text x="100" y="36" font-weight="700" fill="#334155" text-anchor="middle">SST+Manifest</text>
+          <rect x="20" y="282" width="88" height="28" fill="url(#gFull)" rx="3"/>
+          <text x="64" y="276" text-anchor="middle" fill="#334155" font-size="12">0.347</text>
+          <rect x="128" y="77" width="88" height="233" fill="url(#gPrune)" rx="3"/>
+          <text x="172" y="72" text-anchor="middle" fill="#0f172a" font-size="12">2.869</text>
+          <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 8.258×</text>
+        </g>
+
+        <!-- SST-only: full 0.354, prune 2.546, speedup 7.185x -->
+        <g transform="translate(380,0)">
+          <text x="100" y="36" font-weight="700" fill="#334155" text-anchor="middle">SST-only</text>
+          <rect x="20" y="281" width="88" height="29" fill="url(#gFull)" rx="3"/>
+          <text x="64" y="275" text-anchor="middle" fill="#334155" font-size="12">0.354</text>
+          <rect x="128" y="103" width="88" height="207" fill="url(#gPrune)" rx="3"/>
+          <text x="172" y="98" text-anchor="middle" fill="#0f172a" font-size="12">2.546</text>
+          <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 7.185×</text>
+        </g>
+
+        <!-- Manifest-only: full 0.368, prune 0.387, speedup 1.052x -->
+        <g transform="translate(620,0)">
+          <text x="100" y="36" font-weight="700" fill="#334155" text-anchor="middle">Manifest-only</text>
+          <rect x="20" y="280" width="88" height="30" fill="url(#gFull)" rx="3"/>
+          <text x="64" y="274" text-anchor="middle" fill="#334155" font-size="12">0.368</text>
+          <rect x="128" y="279" width="88" height="31" fill="url(#gPrune)" rx="3"/>
+          <text x="172" y="273" text-anchor="middle" fill="#0f172a" font-size="12">0.387</text>
+          <text x="118" y="348" text-anchor="middle" fill="#64748b" font-size="12">speedup 1.052×</text>
+        </g>
+      </svg>
+
+      <div class="legend">
+        <span><span class="dot" style="background:#94a3b8"></span>full_scan（window baseline）</span>
+        <span><span class="dot" style="background:#10b981"></span>prune（<code>--prune-mode</code> 消融）</span>
+      </div>
+
+      <div class="note">
+        纵轴刻度 0–3 QPS；柱高按 <strong>数值 / 3.2 × 260px</strong> 与 QPS 成正比（与旧版「真实吞吐条形图」同一画法）。
+        三组 <strong>full QPS</strong> 略有差异来自各 run 墙钟微小波动，解读以 <strong>同组内 speedup</strong> 与 <strong>prune QPS</strong> 为主。
+      </div>
+    </div>
+
+    <div class="fig">
+      <div class="k">数值表（与图一致；来自 summarize 脚本）</div>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>full QPS</th>
+            <th>prune QPS</th>
+            <th>speedup<sub>wall</sub></th>
+            <th>ratio_wall p50 / p90</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>SST+Manifest</td>
+            <td>0.347</td>
+            <td>2.869</td>
+            <td>8.258×</td>
+            <td>0.1353 / 0.2249</td>
+          </tr>
+          <tr>
+            <td>SST-only</td>
+            <td>0.354</td>
+            <td>2.546</td>
+            <td>7.185×</td>
+            <td>0.1471 / 0.2462</td>
+          </tr>
+          <tr>
+            <td>Manifest-only</td>
+            <td>0.368</td>
+            <td>0.387</td>
+            <td>1.052×</td>
+            <td>1.1144 / 1.1479</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <code>ratio_wall</code> = <code>prune_wall_us / full_wall_us</code>（越小越好）。Manifest-only 下 prune 路径仍可能枚举接近全库键数，与 window baseline 的 <code>full_keys</code>（窗内计数）<strong>不可直接比 key_selectivity</strong>。
+      </div>
+      <div class="note">
+        正确性验证（key+value 对拍）：使用 `st_meta_read_bench --verify-kv-results` 的
+        <code>*_verifykv.tsv</code>，三种模块（SST+Manifest / SST-only / Manifest-only）均为 <strong>12/12</strong> 个窗口
+        `kv_correct=OK`（窗内返回的 <code>(user_key,value)</code> 多重集合一致）。
+      </div>
+    </div>
+  </div>
+</body>
+</html>
