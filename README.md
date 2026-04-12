@@ -125,4 +125,21 @@
 
 ---
 
+## 13. Git 仓库与推送到 GitHub
+
+本机 `D:\Project` 已初始化为 **单一 Git 仓库**（monorepo），根目录 `.gitignore` **不包含** `data/`（本地数据集与实验产物可能达数 GB，请勿提交）。
+
+在 [GitHub](https://github.com/husky926) 上 **新建空仓库**（示例名：`st-rocksdb-project`），然后在本机执行：
+
+```powershell
+cd D:\Project
+git remote add origin https://github.com/husky926/<YOUR_REPO_NAME>.git
+git branch -M main
+git push -u origin main
+```
+
+若曾单独克隆过 `rocksdb` 子目录：当前仓库已 **去掉** `rocksdb/`、`rocksdb_vanilla/` 内嵌的 `.git`，以便由根仓库统一追踪；上游 RocksDB 历史请自行从 [facebook/rocksdb](https://github.com/facebook/rocksdb) 对照。
+
+---
+
 *文档生成对应仓库状态：以 `D:\Project\rocksdb` 中已提交/未提交的本地修改为准；若你后续 `git pull` 上游，需按冲突重新合并上述模块。*
