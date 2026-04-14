@@ -24,7 +24,7 @@ def db_sort_key(path: str) -> tuple[int, str]:
         return (0, path)
     if "segment_164" in p:
         return (1, path)
-    if "segment_776" in p or "segment_736" in p:
+    if "segment_776" in p or "segment_736" in p or "bucket3600" in p:
         return (2, path)
     return (9, path)
 
@@ -40,14 +40,56 @@ def fmt_speedup(x: float) -> str:
     return f"{x:.2f}×"
 
 
-def build_svg_body(agg: dict) -> str:
+def count_live_sst(db_path: str) -> int | None:
+    """Count ``*.sst`` under fork DB path (same as audit / verify script)."""
+    try:
+        p = Path(db_path)
+        if not p.is_dir():
+            return None
+        return sum(1 for _ in p.glob("*.sst"))
+    except OSError:
+        return None
+
+
+def _is_second_tier_164_layout_db(db: str) -> bool:
+    """Middle ablation tier: multi-SST via flush-every-500 (doc ~164 files)."""
+    low = db.replace("\\", "/").lower()
+    return "segment_164" in low or "segment_manysst" in low
+
+
+def tier_column_labels(agg: dict, payload: dict) -> tuple[str, str, str]:
+    """Labels for chart/table: 1st & 3rd use live ``*.sst`` count; 2nd is nominal **164 SST**."""
+    tcl = payload.get("tier_column_labels")
+    if isinstance(tcl, list) and len(tcl) == 3:
+        return (str(tcl[0]), str(tcl[1]), str(tcl[2]))
+    dbs = sorted({db for m in MODES for db in agg.get(m, {})}, key=db_sort_key)
+    if len(dbs) != 3:
+        raise SystemExit(f"expected 3 db paths, got {len(dbs)}")
+    rm = payload.get("run_meta") or {}
+    meta_third = rm.get("third_tier_live_sst_count")
+    out: list[str] = []
+    for i, db in enumerate(dbs):
+        if _is_second_tier_164_layout_db(db):
+            out.append("164 SST")
+            continue
+        n = count_live_sst(db)
+        if n is not None:
+            out.append(f"{n} SST")
+        elif i == 2 and isinstance(meta_third, int) and meta_third > 0:
+            out.append(f"{meta_third} SST")
+        else:
+            out.append("? SST")
+    return (out[0], out[1], out[2])
+
+
+def build_svg_body(agg: dict, *, cluster_titles: tuple[str, str, str]) -> str:
     dbs = sorted({db for m in MODES for db in agg.get(m, {})}, key=db_sort_key)
     if len(dbs) != 3:
         raise SystemExit(f"expected 3 db paths, got {len(dbs)}")
 
     clusters = [
         {
-            "title": "1 SST",
+            "title": cluster_titles[0],
             "title_x": 230,
             "title_fill": "#1e3a8a",
             "fill": "#2563eb",
@@ -56,7 +98,7 @@ def build_svg_body(agg: dict) -> str:
             "lx": [158, 206, 254, 302],
         },
         {
-            "title": "164 SST",
+            "title": cluster_titles[1],
             "title_x": 610,
             "title_fill": "#115e59",
             "fill": "#0d9488",
@@ -65,7 +107,7 @@ def build_svg_body(agg: dict) -> str:
             "lx": [538, 586, 634, 682],
         },
         {
-            "title": "736 SST",
+            "title": cluster_titles[2],
             "title_x": 990,
             "title_fill": "#5b21b6",
             "fill": "#7c3aed",
@@ -145,6 +187,54 @@ def build_svg_body(agg: dict) -> str:
     return "\n".join(parts)
 
 
+def _vanilla_cache_repeat_count(payload: dict) -> int | None:
+    """Read repeat_count from vanilla wall cache JSON referenced by run_meta, if any."""
+    rm = payload.get("run_meta") or {}
+    p = (rm.get("vanilla_wall_cache_json") or "").strip()
+    if not p:
+        return None
+    try:
+        j = json.loads(Path(p).read_text(encoding="utf-8-sig"))
+        rc = j.get("repeat_count")
+        if isinstance(rc, int) and rc > 0:
+            return rc
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    return None
+
+
+def _windows_12_blurb(rm: dict, min_k: int) -> str:
+    """Describe the 12 windows from run_meta windows_csv path."""
+    wcsv = str(rm.get("windows_csv") or "").strip()
+    name = Path(wcsv).name if wcsv else ""
+    esc = html.escape(name) if name else "（见 run_meta）"
+    low = wcsv.lower()
+    if "stratified12" in low:
+        return (
+            f"每库 12 个<strong>分层</strong>窗（<code>{esc}</code>；"
+            f"<code>full_keys≥{min_k}</code>）"
+        )
+    if "random12_cov" in low or ("random12" in low and "cov" in low):
+        return (
+            f"每库 12 个 cov 窗（<code>{esc}</code>；<code>full_keys≥{min_k}</code>）"
+        )
+    return f"每库 12 个实验窗（<code>{esc}</code>；<code>full_keys≥{min_k}</code>）"
+
+
+def _ablation_verify_blurb(payload: dict, n_runs: int) -> str:
+    mk = payload.get("mode_kv")
+    if isinstance(mk, dict) and mk:
+        vals = [str(v) for v in mk.values()]
+        if all("未验证" in v for v in vals):
+            return (
+                f"（<strong>{n_runs} 次</strong>消融；本次为 <strong>VanillaAsBaseline</strong>，"
+                "<code>-VerifyKVResults</code> 未做 fork full↔prune 对拍，准确性列为未验证）。"
+            )
+    return (
+        f"（<strong>{n_runs} 次</strong>消融独立重复，每次均带 <code>-VerifyKVResults</code>）。"
+    )
+
+
 def _vanilla_ui_mode(payload: dict) -> str:
     """cache | live | fork_full — controls chart copy and QPS column titles."""
     rm = payload.get("run_meta") or {}
@@ -157,17 +247,20 @@ def _vanilla_ui_mode(payload: dict) -> str:
     return "fork_full"
 
 
-def _qps_column_titles(vanilla_mode: str) -> tuple[str, str, str]:
+def _qps_column_titles(
+    vanilla_mode: str, col_labels: tuple[str, str, str]
+) -> tuple[str, str, str]:
+    a, b, c = col_labels
     if vanilla_mode in ("cache", "live"):
         return (
-            "QPS Vanilla → prune (1 SST)",
-            "QPS Vanilla → prune (164 SST)",
-            "QPS Vanilla → prune (736 SST)",
+            f"QPS Vanilla → prune ({a})",
+            f"QPS Vanilla → prune ({b})",
+            f"QPS Vanilla → prune ({c})",
         )
     return (
-        "QPS baseline → prune (1 SST)",
-        "QPS baseline → prune (164 SST)",
-        "QPS baseline → prune (736 SST)",
+        f"QPS baseline → prune ({a})",
+        f"QPS baseline → prune ({b})",
+        f"QPS baseline → prune ({c})",
     )
 
 
@@ -177,9 +270,13 @@ def build_summary_table_html(
     n_runs: int,
     min_full_keys: int,
     vanilla_mode: str,
+    vanilla_repeat_count: int | None = None,
+    *,
+    col_labels: tuple[str, str, str] = ("1 SST", "? SST", "? SST"),
 ) -> str:
     dbs = sorted({db for m in MODES for db in agg.get(m, {})}, key=db_sort_key)
-    q1, q2, q3 = _qps_column_titles(vanilla_mode)
+    q1, q2, q3 = _qps_column_titles(vanilla_mode, col_labels)
+    c1, c2, c3 = col_labels
     rows = ""
     for mlabel in MODES:
         label = mlabel.split("(")[0].strip()
@@ -204,7 +301,10 @@ def build_summary_table_html(
         rows += f"<td>{mode_kv.get(mlabel, '—')}</td></tr>\n"
 
     if vanilla_mode == "cache":
-        blurb = "<strong>Vanilla 基线</strong>（每窗 <strong>10 次</strong>中位，见缓存 JSON）"
+        rc = vanilla_repeat_count if vanilla_repeat_count is not None else 10
+        blurb = (
+            f"<strong>Vanilla 基线</strong>（每窗 <strong>{rc} 次</strong>中位，见缓存 JSON）"
+        )
     elif vanilla_mode == "live":
         blurb = "<strong>Vanilla 基线</strong>（上游 RocksDB 逐窗实测，见各 run TSV 中 <code>vanilla_wall_us</code>）"
     else:
@@ -213,14 +313,41 @@ def build_summary_table_html(
         f'<p class="sub"><strong>汇总表</strong>：以下为 <strong>{n_runs} 次</strong>消融重复的算术平均 '
         f'（<code>full_keys≥{min_full_keys}</code>）；倍率分母为 {blurb}；准确性列为各模式下 verify_kv 汇总。</p>\n'
         '<table class="sumtbl">\n<thead><tr>'
-        "<th>模式</th><th>speedup (1 SST)</th><th>speedup (164 SST)</th><th>speedup (736 SST)</th>"
+        f"<th>模式</th><th>speedup ({html.escape(c1)})</th>"
+        f"<th>speedup ({html.escape(c2)})</th>"
+        f"<th>speedup ({html.escape(c3)})</th>"
         f"<th>{html.escape(q1)}</th><th>{html.escape(q2)}</th>"
         f"<th>{html.escape(q3)}</th><th>准确性</th></tr></thead>\n<tbody>\n"
         f"{rows}</tbody></table>\n"
     )
 
 
-def build_lede_block(payload: dict) -> str:
+def build_h1_html(col_labels: tuple[str, str, str]) -> str:
+    a, b, c = (html.escape(x) for x in col_labels)
+    return (
+        f"<h1>无锡消融：bench 验证 12 窗 × 三档 fork 库（{a} / {b} / {c}）。"
+        f"第一档与第三档标题中的数字为对应目录 live <code>*.sst</code> 实测个数；"
+        f"第二档 <strong>{b}</strong> 为实验约定档名（<code>verify_wuxi_segment_164sst</code>，"
+        f"见 <code>EXPERIMENTS_AND_SCRIPTS.md</code> §2.1）。</h1>"
+    )
+
+
+def build_legend_html(col_labels: tuple[str, str, str]) -> str:
+    a, b, c = (html.escape(x) for x in col_labels)
+    return (
+        '  <div class="legend" aria-label="图例">\n'
+        f'    <span><span class="sw" style="background:#2563eb"></span> {a}'
+        "（四柱同色：Base → Global → Local → L+G）</span>\n"
+        f'    <span><span class="sw" style="background:#0d9488"></span> {b}'
+        "（<code>verify_wuxi_segment_164sst</code>，<code>st_meta_smoke --flush-every 500</code>；"
+        "文档期望约 164 个 live SST，compact 后目录内 <code>*.sst</code> 可能增多，表述仍以 <strong>164 档</strong>为准）</span>\n"
+        f'    <span><span class="sw" style="background:#7c3aed"></span> {c}'
+        "（<code>verify_wuxi_segment_bucket3600_sst</code>：<strong>3600s</strong> 事件时间分桶）</span>\n"
+        "  </div>"
+    )
+
+
+def build_lede_block(payload: dict, col_labels: tuple[str, str, str]) -> str:
     n = int(payload.get("n_runs", 0))
     min_k = int(payload.get("min_full_keys", 50))
     runs = payload.get("run_dirs") or []
@@ -228,6 +355,7 @@ def build_lede_block(payload: dict) -> str:
     rm = payload.get("run_meta") or {}
     vcache = (rm.get("vanilla_wall_cache_json") or "").strip()
     vmode = _vanilla_ui_mode(payload)
+    v_repeat = _vanilla_cache_repeat_count(payload)
     parent = ""
     if runs:
         try:
@@ -237,11 +365,13 @@ def build_lede_block(payload: dict) -> str:
 
     if vmode == "cache" and vcache:
         vname = html.escape(Path(vcache).name)
+        rc_txt = str(v_repeat) if v_repeat is not None else "10"
         metric = (
             "<code>sum(vanilla_wall_us) / sum(prune_wall_us)</code>，其中 "
             "<strong>vanilla_wall_us</strong> 来自上游<strong>无改动的 Vanilla RocksDB</strong>，"
-            "并对每 (库×窗) 预先测量 <strong>10 次</strong>取<strong>中位数</strong>写入缓存 "
-            f"<code>{vname}</code>（路径见各 run 下 <code>wuxi_ablation_run_meta.json</code>）。"
+            f"并对每 (库×窗) 预先测量 <strong>{rc_txt} 次</strong>取<strong>中位数</strong>写入缓存 "
+            f"<code>{vname}</code>（路径见各 run 下 <code>wuxi_ablation_run_meta.json</code>；"
+            "缓存内亦有 <code>repeat_count</code>）。"
         )
     elif vmode == "live":
         metric = (
@@ -256,19 +386,33 @@ def build_lede_block(payload: dict) -> str:
             "聚合使用 <code>--baseline fork_full</code>）。"
         )
 
+    win_blurb = _windows_12_blurb(rm if isinstance(rm, dict) else {}, min_k)
+    verify_blurb = _ablation_verify_blurb(payload, n)
+    if n == 1 and first:
+        agg_ref = f"；汇总：<code>{html.escape(first.rstrip('/') + '/aggregate.json')}</code>"
+    else:
+        agg_ref = (
+            f"；汇总：<code>aggregate.json</code>"
+            f"{('（<code>' + html.escape(parent) + '</code>）') if parent else ''}"
+        )
+    c1, c2, c3 = (html.escape(x) for x in col_labels)
     p1 = (
         f'<p class="sub"><strong>指标</strong>：{metric}'
-        f"每库 12 个 cov 窗（<code>full_keys≥{min_k}</code>）先按窗求和再相除。"
+        f"{win_blurb}先按窗求和再相除。"
         f"<strong>Base</strong> 为 <strong>1.0×</strong>；其余柱为 Global / Local / L+G 的<strong>算术平均倍率</strong>"
-        f"（<strong>{n} 次</strong>消融独立重复，每次均带 <code>-VerifyKVResults</code>）。"
-        f"原始 TSV：<code>{html.escape(first)}</code> …；汇总：<code>aggregate.json</code>"
-        f"{('（<code>' + html.escape(parent) + '</code>）') if parent else ''}。"
-        f"多 SST 档为 776 目录缺失时的 <strong>736sst</strong> 回退。</p>"
+        f"{verify_blurb}"
+        f"原始 TSV：<code>{html.escape(first)}</code> …{agg_ref}。"
+        f"三档 fork 路径见各 run 的 <code>wuxi_ablation_run_meta.json</code>；"
+        f"柱簇标题与表头：<strong>{c1}</strong>、<strong>{c3}</strong> 为对应目录 live <code>*.sst</code> 实测个数；"
+        f"<strong>{c2}</strong> 指 <code>verify_wuxi_segment_164sst</code>（<code>st_meta_smoke --flush-every 500</code>），"
+        f"文档期望约 164 个 live SST，若经 compact 后目录内文件更多，图表与正文仍按约定称为 <strong>164 档</strong>。"
+        f"第三档按 <strong>3600s</strong> 时间桶灌库（<code>verify_wuxi_segment_bucket3600_sst</code>；"
+        f"历史名 <code>776sst</code>/<code>736sst</code> 仅为兼容；<strong>{c3}</strong> 中数字为实测 <code>N</code>）。</p>"
     )
     p2 = (
         '<p class="sub"><strong>柱高</strong>：每簇按该簇四柱<strong>最大倍率</strong>归一化；'
-        "柱顶标签为平均倍率。1 SST 上 Global 相对 Base 可略低于或略高于 1×（取决于重复与噪声）。"
-        "736 簇 Base 柱设<strong>最小可视高度</strong>，数值仍以标签为准。</p>"
+        f"柱顶标签为平均倍率。第一档（{c1}）上 Global 相对 Base 可略低于或略高于 1×（取决于重复与噪声）。"
+        f"第三档（{c3}）簇 Base 柱设<strong>最小可视高度</strong>，数值仍以标签为准。</p>"
     )
     return f"{p1}\n  {p2}"
 
@@ -288,7 +432,8 @@ def main() -> int:
     html_out = args.html_out or Path("docs/st_ablation_wuxi_1sst_vs_manysst.html")
     data = json.loads(args.aggregate_json.read_text(encoding="utf-8"))
     agg = data["aggregate"]
-    body = build_svg_body(agg)
+    col_labels = tier_column_labels(agg, data)
+    body = build_svg_body(agg, cluster_titles=col_labels)
     mode_kv = mode_kv_from_payload(data)
     if not mode_kv:
         dbs0 = sorted({db for m in MODES for db in agg.get(m, {})}, key=db_sort_key)
@@ -296,14 +441,19 @@ def main() -> int:
         for mlabel in MODES:
             mode_kv[mlabel] = str(agg.get(mlabel, {}).get(db0, {}).get("kv_note", "—"))
     vmode = _vanilla_ui_mode(data)
+    v_repeat = _vanilla_cache_repeat_count(data)
     table_html = build_summary_table_html(
         agg,
         mode_kv,
         int(data["n_runs"]),
         int(data.get("min_full_keys", 50)),
         vmode,
+        vanilla_repeat_count=v_repeat,
+        col_labels=col_labels,
     )
-    lede_html = build_lede_block(data)
+    lede_html = build_lede_block(data, col_labels)
+    h1_html = build_h1_html(col_labels)
+    legend_html = build_legend_html(col_labels)
 
     html = html_out.read_text(encoding="utf-8")
 
@@ -327,6 +477,22 @@ def main() -> int:
             "Warning: WUXI_ABLATION_LEDE markers missing; skipping lede refresh",
             file=sys.stderr,
         )
+
+    h1_start = "<!-- WUXI_ABLATION_H1 -->"
+    h1_end = "<!-- /WUXI_ABLATION_H1 -->"
+    h1_block = f"{h1_start}\n  {h1_html}\n  {h1_end}"
+    if h1_start in html and h1_end in html:
+        html, nh1 = re.subn(
+            rf"{re.escape(h1_start)}[\s\S]*?{re.escape(h1_end)}",
+            lambda _m: h1_block,
+            html,
+            count=1,
+        )
+        if nh1 != 1:
+            print("H1 replace failed", file=sys.stderr)
+            return 1
+    else:
+        print("Warning: WUXI_ABLATION_H1 markers missing; skipping h1 refresh", file=sys.stderr)
 
     new_svg = (
         '<svg viewBox="0 0 1240 400" xmlns="http://www.w3.org/2000/svg">\n'
@@ -359,6 +525,25 @@ def main() -> int:
             print("Could not find insertion point before legend", file=sys.stderr)
             return 1
         html2 = html2.replace(needle, f"  </svg>\n\n  {block}\n\n  <div class=\"legend\"", 1)
+
+    leg_start = "<!-- WUXI_ABLATION_LEGEND -->"
+    leg_end = "<!-- /WUXI_ABLATION_LEGEND -->"
+    leg_block = f"{leg_start}\n{legend_html}\n  {leg_end}"
+    if leg_start in html2 and leg_end in html2:
+        html2, nleg = re.subn(
+            rf"{re.escape(leg_start)}[\s\S]*?{re.escape(leg_end)}",
+            lambda _m: leg_block,
+            html2,
+            count=1,
+        )
+        if nleg != 1:
+            print("LEGEND replace failed", file=sys.stderr)
+            return 1
+    else:
+        print(
+            "Warning: WUXI_ABLATION_LEGEND markers missing; skipping legend refresh",
+            file=sys.stderr,
+        )
 
     html_out.write_text(html2, encoding="utf-8")
     print(f"Updated {html_out}", file=sys.stderr)

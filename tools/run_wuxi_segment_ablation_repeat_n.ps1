@@ -1,5 +1,5 @@
 # Repeat Wuxi 1/164/776 (736 fallback) three-mode ablation N times into BaseOutDir\run_01 .. run_NN.
-# Default: -VerifyKVResults for query correctness; optional -NoVerifyKVResults for faster iteration.
+# 主脚本默认开启 KV 验证；可选 -NoVerifyKVResults（= 传 -SkipVerifyKVResults）加速迭代。
 #
 # Example:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\run_wuxi_segment_ablation_repeat_n.ps1 -N 10 -BaseOutDir D:\Project\data\experiments\wuxi_ablation_10r_verifykv
@@ -37,8 +37,8 @@ for ($i = 1; $i -le $N; $i++) {
     "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $Main,
     "-OutDir", $OutDir
   )
-  if (-not $NoVerifyKVResults.IsPresent) {
-    $args += "-VerifyKVResults"
+  if ($NoVerifyKVResults.IsPresent) {
+    $args += "-SkipVerifyKVResults"
   }
   if ($SummarizePooled.IsPresent) {
     $args += "-SummarizePooled"

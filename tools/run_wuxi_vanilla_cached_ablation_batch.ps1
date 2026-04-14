@@ -6,10 +6,12 @@
 #  4) python refresh_wuxi_ablation_chart_html.py aggregate.json docs/st_ablation_wuxi_1sst_vs_manysst.html
 #
 # Usage:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\run_wuxi_vanilla_cached_ablation_batch.ps1 -VerifyKVResults
+#   powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\run_wuxi_vanilla_cached_ablation_batch.ps1
+#   （默认对消融开启 KV 验证；仅加速迭代时加 -SkipVerifyKVResults）
 #
 # Prerequisites: upstream-RocksDB-readable replicas for each fork DB (see tools/build_wuxi_vanilla_replica_dbs.ps1).
 # Cache build uses *_vanilla_replica paths; ablation bench still uses fork verify_wuxi_segment_* paths.
+# Pre-flight: tools\audit_wuxi_ablation_inputs.ps1 (164sst must be multi-SST, not 1 file).
 
 param(
   [string]$ParentOutDir = "",
@@ -17,11 +19,12 @@ param(
   [int]$VanillaRepeat = 10,
   [int]$AblationRuns = 10,
   [string]$WindowsCsv = "",
-  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_776sst",
+  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_bucket3600_sst",
   [string]$RefreshHtml = "",
-  [switch]$VerifyKVResults,
+  [switch]$SkipVerifyKVResults,
   [switch]$SkipBuildVanillaCache,
-  [switch]$ForceBuildVanillaCache
+  [switch]$ForceBuildVanillaCache,
+  [int]$TimeBucketCount = 736
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,14 +36,10 @@ $RootDir = Resolve-Path (Join-Path $ToolsDir "..")
 
 function Resolve-ForkRocksDbPathsCsv {
   param([string]$Csv)
-  $p776 = Join-Path $RootDir "data\verify_wuxi_segment_776sst"
-  $p736 = Join-Path $RootDir "data\verify_wuxi_segment_736sst"
-  $out = $Csv
-  if ($out -match "776sst" -and -not (Test-Path -LiteralPath $p776) -and (Test-Path -LiteralPath $p736)) {
-    Write-Warning "verify_wuxi_segment_776sst not found; using verify_wuxi_segment_736sst (same as run_wuxi_segment_ablation_1_164_776.ps1)."
-    $out = $out.Replace("verify_wuxi_segment_776sst", "verify_wuxi_segment_736sst")
-  }
-  return $out
+  . (Join-Path $PSScriptRoot "wuxi_resolve_third_tier_fork.ps1")
+  $dataRoot = [System.IO.Path]::GetFullPath((Join-Path $RootDir "data"))
+  $r = Get-WuxiResolvedThirdTierCsv -RocksDbPathsCsv $Csv -DataRoot $dataRoot
+  return $r.RocksDbPathsCsv
 }
 
 function Get-VanillaReplicaPathsCsv {
@@ -67,9 +66,12 @@ Or set -RocksDbPathsCsv to fork paths that have sibling *_vanilla_replica direct
   return ($reps -join ',')
 }
 
+$Stratified12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv"
 $Random12Cov = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_cov_s42.csv"
 if ([string]::IsNullOrWhiteSpace($WindowsCsv)) {
-  if (Test-Path -LiteralPath $Random12Cov) {
+  if (Test-Path -LiteralPath $Stratified12) {
+    $WindowsCsv = $Stratified12
+  } elseif (Test-Path -LiteralPath $Random12Cov) {
     $WindowsCsv = $Random12Cov
   }
 }
@@ -140,8 +142,12 @@ for ($i = 1; $i -le $AblationRuns; $i++) {
     $aargs += "-WindowsCsv"
     $aargs += $WindowsCsv
   }
-  if ($VerifyKVResults.IsPresent) {
-    $aargs += "-VerifyKVResults"
+  if ($SkipVerifyKVResults.IsPresent) {
+    $aargs += "-SkipVerifyKVResults"
+  }
+  if ($TimeBucketCount -gt 0) {
+    $aargs += "-TimeBucketCount"
+    $aargs += "$TimeBucketCount"
   }
   Write-Host "--- $sub ---" -ForegroundColor Yellow
   & powershell @aargs

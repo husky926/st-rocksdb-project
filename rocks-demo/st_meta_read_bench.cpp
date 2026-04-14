@@ -1,11 +1,13 @@
-// Real RocksDB read benchmark on an EXISTING DB (e.g. verify_traj_st_full).
+// Real RocksDB read benchmark on an EXISTING DB (e.g. verify_wuxi_segment_bucket3600_sst).
 // Measures wall time + PerfContext block_read_count + IOStatsContext bytes/read_nanos
 // for baseline vs experimental_st_prune_scan (same iterator API as st_meta_scan_bench).
 //
+// Default prune window = Wuxi wx_strat_narrow_01 (tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv).
+//
 // Usage:
-//   st_meta_read_bench --db D:/Project/data/verify_traj_st_full \
-//     --prune-t-min 1224600000 --prune-t-max 1224800000 \
-//     --prune-x-min 116.2 --prune-x-max 116.4 --prune-y-min 39.9 --prune-y-max 40.1
+//   st_meta_read_bench --db D:/Project/data/verify_wuxi_segment_bucket3600_sst \
+//     --prune-t-min 1596200000 --prune-t-max 1596203600 \
+//     --prune-x-min 120.02 --prune-x-max 120.34 --prune-y-min 31.52 --prune-y-max 31.88
 //
 // Use --no-full-scan to only run the pruned pass (faster if you only care about query path).
 // Use --no-prune-scan to only run the full-table pass (stock-like: no experimental_st_prune_scan).
@@ -123,16 +125,17 @@ void IoStatsDiff(const IoSnap& before, const char* label) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  constexpr const char* kId = "st_meta_read_bench 2026-04-05 open-existing";
+  constexpr const char* kId = "st_meta_read_bench 2026-04-12 open-existing wuxi-default-prune-window";
   std::cout << kId << "\n";
 
   std::string db_path;
-  uint32_t prune_t_min = 1224600000;
-  uint32_t prune_t_max = 1224800000;
-  float prune_x_min = 116.2f;
-  float prune_x_max = 116.4f;
-  float prune_y_min = 39.9f;
-  float prune_y_max = 40.1f;
+  // Default window: Wuxi stratified narrow_01 (st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv).
+  uint32_t prune_t_min = 1596200000;
+  uint32_t prune_t_max = 1596203600;
+  float prune_x_min = 120.020000f;
+  float prune_x_max = 120.340000f;
+  float prune_y_min = 31.520000f;
+  float prune_y_max = 31.880000f;
   bool run_full = true;
   bool run_prune = true;
   int block_cache_mb = 8;
@@ -159,9 +162,18 @@ int main(int argc, char** argv) {
   bool virtual_merge_enable = false;
   bool virtual_merge_auto = false;
   uint32_t vm_time_span_sec_threshold = 6 * 3600;
+  // manifest-only: use sequential disjoint checks only (debug / A-B vs bucket path).
+  bool manifest_linear_file_skip_only = false;
+  // When time-bucket R-tree file path is on: pre-scan eligible SSTs; if
+  // disjoint/eligible < threshold, skip BVH and use linear disjoint only.
+  bool file_level_rtree_skip_ratio_gate = false;
+  float file_level_rtree_min_skip_ratio = 0.2f;
   // Same DB + same ReadOptions: repeat NewIterator + full prune scan to amortize
   // Version-level ST meta cache (LevelIterator compact arrays) across iterators.
   int iterator_repeat = 1;
+  // Scheme B (bench-only): stop after N distinct SST opens per level iterator
+  // (forward SeekToFirst+Next). 0 = unlimited. Results are incomplete when hit.
+  uint32_t debug_max_distinct_sst_files = 0;
 
   for (int i = 1; i < argc; ++i) {
     const char* a = argv[i];
@@ -331,6 +343,24 @@ int main(int argc, char** argv) {
       }
       continue;
     }
+    if (std::strcmp(a, "--manifest-linear-file-skip") == 0) {
+      manifest_linear_file_skip_only = true;
+      continue;
+    }
+    if (std::strcmp(a, "--file-level-rtree-skip-ratio-gate") == 0) {
+      file_level_rtree_skip_ratio_gate = true;
+      continue;
+    }
+    if (std::strcmp(a, "--file-level-rtree-min-skip-ratio") == 0 &&
+        i + 1 < argc) {
+      if (!ParseFloat(argv[++i], &file_level_rtree_min_skip_ratio) ||
+          file_level_rtree_min_skip_ratio < 0.0f ||
+          file_level_rtree_min_skip_ratio > 1.0f) {
+        std::cerr << "Invalid --file-level-rtree-min-skip-ratio (0..1)\n";
+        return 1;
+      }
+      continue;
+    }
     if (std::strcmp(a, "--iterator-repeat") == 0 && i + 1 < argc) {
       errno = 0;
       const long v = std::strtol(argv[++i], nullptr, 10);
@@ -341,6 +371,13 @@ int main(int argc, char** argv) {
       iterator_repeat = static_cast<int>(v);
       continue;
     }
+    if (std::strcmp(a, "--debug-max-distinct-sst-files") == 0 && i + 1 < argc) {
+      if (!ParseU32(argv[++i], &debug_max_distinct_sst_files)) {
+        std::cerr << "Invalid --debug-max-distinct-sst-files\n";
+        return 1;
+      }
+      continue;
+    }
     if (std::strcmp(a, "-h") == 0 || std::strcmp(a, "--help") == 0) {
       std::cout
           << "st_meta_read_bench --db <existing_dir> [options]\n"
@@ -349,7 +386,7 @@ int main(int argc, char** argv) {
              "  Metrics: wall_us, perf_context block_read_count, IOStatsContext "
              "bytes_read/read_nanos.\n"
              "Options:\n"
-             "  --prune-t-min/max <u32>  (default Geolife-ish unix as uint32)\n"
+             "  --prune-t-min/max <u32>  (default: Wuxi randcov_w01, see EXPERIMENTS_AND_SCRIPTS.md §0.5)\n"
              "  --prune-x-min/max --prune-y-min/max <float>\n"
              "  --full-scan-mode <window|all_cf>\n"
              "                          window (default): baseline = full CF scan but\n"
@@ -359,7 +396,8 @@ int main(int argc, char** argv) {
              "  --no-prune-scan          only run baseline pass (no ST prune)\n"
              "  --prune-mode <sst|manifest|manifest_timebucket_rtree|sst_manifest|sst_manifest_pipeline|sst_manifest_adaptive>\n"
              "                          prune sub-features: SST only (block+key),\n"
-             "                          Manifest only (file), or both (default).\n"
+             "                          Manifest only (file-level; default uses time buckets + spatial index),\n"
+             "                          or both (default sst_manifest).\n"
              "  --block-cache-mb N       LRU block cache size (default 8)\n"
              "  --large-cache            use at least 64MB block cache\n"
              "  --verify-kv-results     full vs prune: compare in-window (key,value) set\n"
@@ -367,8 +405,11 @@ int main(int argc, char** argv) {
              "  --sst-manifest-adaptive-key-gate  in sst_manifest mode, auto-disable key-level for high-overlap files\n"
              "  --sst-manifest-adaptive-block-gate  in sst_manifest mode, auto-disable block+key for very high-overlap files\n"
              "  --sst-manifest-key-level-boundary-only <0|1>  skip key-level ST checks when block index MBR is fully inside query\n"
-             "  --time-bucket-count N   manifest_timebucket_rtree: number of time buckets (default 32)\n"
-             "  --rtree-leaf-size N     manifest_timebucket_rtree: leaf fanout (default 8)\n"
+             "  --time-bucket-count N   manifest / manifest_timebucket_rtree / virtual-merge: bucket count (default 32)\n"
+             "  --rtree-leaf-size N     manifest / manifest_timebucket_rtree / virtual-merge: spatial index leaf fanout (default 8)\n"
+             "  --manifest-linear-file-skip  manifest mode only: disable bucket/spatial index (linear file disjoint scan)\n"
+             "  --file-level-rtree-skip-ratio-gate  when time-bucket R-tree path is on: skip BVH if disjoint/eligible < min ratio\n"
+             "  --file-level-rtree-min-skip-ratio F  gate threshold in [0,1] (default 0.2; requires --file-level-rtree-skip-ratio-gate)\n"
              "  --adaptive-overlap-threshold F  sst_manifest_adaptive key-level off threshold (0..1, default 0.6)\n"
              "  --adaptive-block-overlap-threshold F  sst_manifest block-level off threshold (0..1, default 0.85)\n"
              "  --vm-contains-batch-prewarm <0|1>  enable/disable LevelIterator kContains batch prewarm (default 1)\n"
@@ -377,6 +418,8 @@ int main(int argc, char** argv) {
              "  --vm-time-span-sec-threshold N  auto threshold in seconds (default 21600)\n"
              "  --iterator-repeat N        run N sequential prune scans (new iterator each time;\n"
              "                             stresses Version-level ST meta cache vs cold per-iterator build)\n"
+             "  --debug-max-distinct-sst-files N  bench-only: cap SST file opens per level (0=off).\n"
+             "                             Stops iteration early — incomplete results; for locality A/B.\n"
              "  When prune runs: one-line BENCH_CONTRIB ... for grep/log (file/block/key counters).\n";
       return 0;
     }
@@ -525,6 +568,7 @@ int main(int argc, char** argv) {
     uint64_t prune_block_index_examined = 0;
     uint64_t prune_block_index_skipped_disjoint = 0;
     uint64_t prune_block_index_stop_missing_meta = 0;
+    uint64_t prune_block_index_prune_ns = 0;
     uint64_t prune_key_examined = 0;
     uint64_t prune_key_skipped_disjoint = 0;
     prune.experimental_st_prune_scan.file_level_files_skipped = &prune_files_skipped;
@@ -547,6 +591,10 @@ int main(int argc, char** argv) {
         &prune_block_index_skipped_disjoint;
     prune.experimental_st_prune_scan.block_level_index_stops_missing_meta =
         &prune_block_index_stop_missing_meta;
+    prune.experimental_st_prune_scan.block_level_index_prune_ns =
+        &prune_block_index_prune_ns;
+    prune.experimental_st_prune_scan.debug_max_distinct_sst_files =
+        debug_max_distinct_sst_files;
     prune.experimental_st_prune_scan.key_level_keys_examined =
         &prune_key_examined;
     prune.experimental_st_prune_scan.key_level_keys_skipped_disjoint =
@@ -554,10 +602,10 @@ int main(int argc, char** argv) {
 
     // Strict ablation presets.
     // - sst: SST-side only (block-level + block内键过滤), no file-level skip
-    // - manifest: Manifest-side only (file-level skip), no block/key pruning
-    // - manifest_timebucket_rtree: Manifest-side only, but file-level
-    //                               skipping uses a per-query time-bucket
-    //                               R-tree-like spatial index.
+    // - manifest: Manifest-side only (file-level skip), no block/key pruning.
+    //              By default uses the same time-bucket + spatial index file path
+    //              as manifest_timebucket_rtree (override: --manifest-linear-file-skip).
+    // - manifest_timebucket_rtree: same file-level path as manifest (explicit name).
     // - sst_manifest: both sides on (default; matches previous behavior)
     // - sst_manifest_pipeline: two-stage pipeline experiment:
     //     Global(file-level) + Local(block-level), key-level off to reduce
@@ -570,6 +618,14 @@ int main(int argc, char** argv) {
       prune.experimental_st_prune_scan.file_level_enable = true;
       prune.experimental_st_prune_scan.block_level_enable = false;
       prune.experimental_st_prune_scan.key_level_enable = false;
+      if (!manifest_linear_file_skip_only) {
+        prune.experimental_st_prune_scan.file_level_time_bucket_rtree_enable =
+            true;
+        prune.experimental_st_prune_scan.file_level_time_bucket_count =
+            time_bucket_count;
+        prune.experimental_st_prune_scan.file_level_rtree_leaf_size =
+            rtree_leaf_size;
+      }
     } else if (prune_mode == "manifest_timebucket_rtree") {
       prune.experimental_st_prune_scan.file_level_enable = true;
       prune.experimental_st_prune_scan.block_level_enable = false;
@@ -630,8 +686,17 @@ int main(int argc, char** argv) {
         prune.experimental_st_prune_scan.file_level_rtree_leaf_size =
             rtree_leaf_size;
       }
-      std::cout << "virtual_merge enabled=" << (enable_virtual_merge ? 1 : 0)
-                << " manual=" << (virtual_merge_enable ? 1 : 0)
+      const bool rtree_path =
+          prune.experimental_st_prune_scan.file_level_time_bucket_rtree_enable;
+      if (file_level_rtree_skip_ratio_gate && rtree_path) {
+        prune.experimental_st_prune_scan.file_level_rtree_skip_ratio_gate_enable =
+            true;
+        prune.experimental_st_prune_scan.file_level_rtree_min_skip_ratio =
+            file_level_rtree_min_skip_ratio;
+      }
+      std::cout << "file_level_time_bucket_rtree=" << (rtree_path ? 1 : 0)
+                << " virtual_merge_gate=" << (enable_virtual_merge ? 1 : 0)
+                << " manual_vm=" << (virtual_merge_enable ? 1 : 0)
                 << " auto=" << (virtual_merge_auto ? 1 : 0)
                 << " auto_hit=" << (auto_hit ? 1 : 0)
                 << " span_sec=" << span_sec
@@ -640,6 +705,15 @@ int main(int argc, char** argv) {
                 << prune.experimental_st_prune_scan.file_level_time_bucket_count
                 << " leaf_size="
                 << prune.experimental_st_prune_scan.file_level_rtree_leaf_size
+                << " manifest_linear_only="
+                << (manifest_linear_file_skip_only ? 1 : 0)
+                << " rtree_skip_ratio_gate="
+                << (prune.experimental_st_prune_scan
+                        .file_level_rtree_skip_ratio_gate_enable
+                    ? 1
+                    : 0)
+                << " rtree_min_skip_ratio="
+                << prune.experimental_st_prune_scan.file_level_rtree_min_skip_ratio
                 << "\n";
     }
 
@@ -665,6 +739,7 @@ int main(int argc, char** argv) {
       prune_block_index_examined = 0;
       prune_block_index_skipped_disjoint = 0;
       prune_block_index_stop_missing_meta = 0;
+      prune_block_index_prune_ns = 0;
       prune_key_examined = 0;
       prune_key_skipped_disjoint = 0;
       if (verify_kv_results) {
@@ -725,6 +800,26 @@ int main(int argc, char** argv) {
               << " index_skipped_st_disjoint=" << prune_block_index_skipped_disjoint
               << " index_stop_missing_meta=" << prune_block_index_stop_missing_meta
               << "\n";
+    if (prune_block_index_examined > 0) {
+      const double skip_rate_pct =
+          100.0 * static_cast<double>(prune_block_index_skipped_disjoint) /
+          static_cast<double>(prune_block_index_examined);
+      const double prune_ns_per_index_entry =
+          static_cast<double>(prune_block_index_prune_ns) /
+          static_cast<double>(prune_block_index_examined);
+      std::cout << "prune_block_metrics Block_Skip_Rate_pct=" << std::fixed
+                << std::setprecision(4) << skip_rate_pct
+                << " (index_skipped_st_disjoint/index_examined*100; block index "
+                   "entries, not data blocks)\n";
+      std::cout << "prune_block_metrics Pruning_Latency_Per_BlockIndexEntry_ns="
+                << std::setprecision(4) << prune_ns_per_index_entry
+                << " (block_level_index_prune_ns/index_examined)\n";
+      std::cout << std::defaultfloat;
+    } else {
+      std::cout << "prune_block_metrics Block_Skip_Rate_pct=n/a "
+                   "Pruning_Latency_Per_BlockIndexEntry_ns=n/a (no index "
+                   "examinations)\n";
+    }
     std::cout << "prune_key_diag keys_examined=" << prune_key_examined
               << " keys_skipped_disjoint=" << prune_key_skipped_disjoint << "\n";
     std::cout << "BENCH_CONTRIB"
@@ -735,6 +830,8 @@ int main(int argc, char** argv) {
               << prune_block_index_skipped_disjoint
               << " block_index_stop_missing_meta="
               << prune_block_index_stop_missing_meta
+              << " block_index_prune_ns=" << prune_block_index_prune_ns
+              << " debug_max_distinct_sst_files=" << debug_max_distinct_sst_files
               << " key_examined=" << prune_key_examined
               << " key_skipped_disjoint=" << prune_key_skipped_disjoint << "\n";
     std::cout << "prune window t=[" << prune_t_min << "," << prune_t_max << "] x=["

@@ -8,6 +8,8 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include "table/block_based/block_based_table_iterator.h"
 
+#include <chrono>
+
 #include "db/dbformat.h"
 #include "table/format.h"
 #include "table/st_meta_user_key.h"
@@ -30,15 +32,25 @@ void AdvanceIndexPastPrunedForward(
         IsStLocalPruneShortCircuited(ro)) {
       break;
     }
+    const auto t0 = std::chrono::steady_clock::now();
     const IndexValue& v = index_iter->value();
     const auto& q = ro.experimental_st_prune_scan;
     if (q.block_level_index_entries_examined != nullptr) {
       ++(*q.block_level_index_entries_examined);
     }
+    auto record_prune_ns = [&] {
+      if (q.block_level_index_prune_ns != nullptr) {
+        *q.block_level_index_prune_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count());
+      }
+    };
     if (!v.has_st_meta) {
       if (q.block_level_index_stops_missing_meta != nullptr) {
         ++(*q.block_level_index_stops_missing_meta);
       }
+      record_prune_ns();
       break;
     }
     const auto& m = v.st_meta;
@@ -47,9 +59,11 @@ void AdvanceIndexPastPrunedForward(
       if (q.block_level_index_entries_skipped_st_disjoint != nullptr) {
         ++(*q.block_level_index_entries_skipped_st_disjoint);
       }
+      record_prune_ns();
       index_iter->Next();
       continue;
     }
+    record_prune_ns();
     break;
   }
 }

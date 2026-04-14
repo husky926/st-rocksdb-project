@@ -7,11 +7,14 @@
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\build_wuxi_vanilla_replica_dbs.ps1
+# Third tier defaults to verify_wuxi_segment_bucket3600_sst; override with -ForkThirdTierHourly or legacy -Fork736.
 
 param(
   [string]$Fork1sst = "D:\Project\data\verify_wuxi_segment_1sst",
   [string]$Fork164 = "D:\Project\data\verify_wuxi_segment_164sst",
-  [string]$Fork736 = "D:\Project\data\verify_wuxi_segment_736sst",
+  # Third tier = hourly 3600s bucket ingest (canonical dir name). Legacy: Fork736 overrides this.
+  [string]$ForkThirdTierHourly = "D:\Project\data\verify_wuxi_segment_bucket3600_sst",
+  [string]$Fork736 = "",
   [string]$Suffix = "_vanilla_replica",
   [string]$WorkDir = "",
   [string]$BuildDir = ""
@@ -92,13 +95,15 @@ function Build-One {
   Write-Host "OK: $dest" -ForegroundColor Green
 }
 
+$forkThird = if (-not [string]::IsNullOrWhiteSpace($Fork736)) { $Fork736 } else { $ForkThirdTierHourly }
+
 Build-One -ForkPath $Fork1sst -DumpTool $DumpExe -IngestTool $IngestExe -TempDir $WorkDir
 Build-One -ForkPath $Fork164 -DumpTool $DumpExe -IngestTool $IngestExe -TempDir $WorkDir
-Build-One -ForkPath $Fork736 -DumpTool $DumpExe -IngestTool $IngestExe -TempDir $WorkDir
+Build-One -ForkPath $forkThird -DumpTool $DumpExe -IngestTool $IngestExe -TempDir $WorkDir
 
 Write-Host ""
 Write-Host "Next: run Vanilla wall cache against replicas, e.g." -ForegroundColor DarkGray
 $v1 = Replica-Path $Fork1sst
 $v164 = Replica-Path $Fork164
-$v736 = Replica-Path $Fork736
-Write-Host "  powershell ...\cache_wuxi_vanilla_wall_baseline.ps1 -RocksDbPathsCsv `"$v1,$v164,$v736`" -OutJson D:\Project\data\experiments\wuxi_vanilla_wall_cache.json" -ForegroundColor DarkGray
+$vMulti = Replica-Path $forkThird
+Write-Host "  powershell ...\cache_wuxi_vanilla_wall_baseline.ps1 -RocksDbPathsCsv `"$v1,$v164,$vMulti`" -OutJson D:\Project\data\experiments\wuxi_vanilla_wall_cache.json" -ForegroundColor DarkGray

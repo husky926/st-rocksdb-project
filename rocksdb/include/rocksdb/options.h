@@ -2353,6 +2353,14 @@ struct ReadOptions {
     bool file_level_contains_batch_prewarm_enable = true;
     uint32_t file_level_time_bucket_count = 32;
     uint32_t file_level_rtree_leaf_size = 8;
+    // When true with file_level_time_bucket_rtree_enable: before building the
+    // per-level bucket+BVH index, estimate the fraction of eligible SSTs (has
+    // st_file_meta, no range deletions) whose file-level bounds are disjoint
+    // from the query window. If disjoint_count / eligible <
+    // file_level_rtree_min_skip_ratio, skip BVH construction and use linear
+    // disjoint checks only (same OpenTable semantics, less preprocessing).
+    bool file_level_rtree_skip_ratio_gate_enable = false;
+    float file_level_rtree_min_skip_ratio = 0.2f;
     // Experimental: adaptive gating for Local+Global pruning in per-file mode.
     // If overlap score is high enough, block-level+key-level can both be
     // disabled (global-only path for that file).
@@ -2387,6 +2395,14 @@ struct ReadOptions {
     uint64_t* block_level_index_entries_examined = nullptr;
     uint64_t* block_level_index_entries_skipped_st_disjoint = nullptr;
     uint64_t* block_level_index_stops_missing_meta = nullptr;
+    // Internal diagnostic: wall time (steady_clock ns) spent in block-index ST
+    // prune decisions (AdvanceIndexPastPrunedForward), summed over examined
+    // index entries for this ReadOptions.
+    uint64_t* block_level_index_prune_ns = nullptr;
+    // Bench-only: cap how many distinct SST files LevelIterator may open when
+    // advancing (forward/backward). 0 = disabled. When the cap is hit,
+    // iteration stops early (results incomplete — for A/B locality experiments).
+    uint32_t debug_max_distinct_sst_files = 0;
     // Internal diagnostics: per-key ST pruning inside data blocks (key-level).
     uint64_t* key_level_keys_examined = nullptr;
     uint64_t* key_level_keys_skipped_disjoint = nullptr;

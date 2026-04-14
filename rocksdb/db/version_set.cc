@@ -1561,6 +1561,9 @@ class LevelIterator final : public InternalIterator {
   // file-level time-bucket R-tree pruning is enabled. Derived from file_skip_mask_.
   mutable std::vector<size_t> st_candidate_files_ = {};
   mutable bool st_candidate_files_ready_ = false;
+  // Skip-ratio gate: when true, do not build bucket+BVH (linear disjoint only).
+  mutable bool file_level_rtree_gate_evaluated_ = false;
+  mutable bool file_level_rtree_gate_use_linear_only_ = false;
   mutable std::vector<char> file_time_upper_skip_mask_ = {};
   mutable bool file_time_upper_skip_mask_ready_ = false;
   // Keep per-file effective ReadOptions alive for current SST iterator.
@@ -1571,6 +1574,8 @@ class LevelIterator final : public InternalIterator {
   mutable std::vector<SpatioTemporalBlockMeta> compact_st_meta_ = {};
   mutable bool st_order_by_tmin_ready_ = false;
   mutable std::vector<size_t> st_order_by_tmin_ = {};
+  // Bench-only: distinct SST opens in this LevelIterator (reset in SeekToFirst).
+  size_t dbg_distinct_sst_files_ = 0;
   void EnsureCompactStMeta() const;
   void EnsureStOrderByTMin() const;
   void EnsureTimeUpperBoundSkipMask() const;
@@ -1578,6 +1583,7 @@ class LevelIterator final : public InternalIterator {
   bool TrySkipEightFilesWithAvx2(size_t i, size_t* next_i) const;
   void EnsureTimeBucketRTreeSkipMask() const;
   void EnsureStCandidateFilesFromSkipMask() const;
+  void EnsureFileLevelRtreeSkipRatioGate() const;
 
   // Forward scan only (SeekToFirst / Next): skip files whose file-level ST
   // meta is disjoint from experimental_st_prune_scan. Seek() must not use this.
@@ -1585,36 +1591,39 @@ class LevelIterator final : public InternalIterator {
     size_t i = start;
     const auto& q = read_options_.experimental_st_prune_scan;
     if (q.enable && q.file_level_enable && q.file_level_time_bucket_rtree_enable) {
-      EnsureStCandidateFilesFromSkipMask();
-      auto it = std::lower_bound(st_candidate_files_.begin(),
-                                 st_candidate_files_.end(), start);
-      const size_t next =
-          (it == st_candidate_files_.end()) ? flevel_->num_files : *it;
-      const bool need_diag = (q.file_level_files_considered != nullptr) ||
-                             (q.file_level_files_time_disjoint != nullptr) ||
-                             (q.file_level_files_space_disjoint != nullptr) ||
-                             (q.file_level_files_skipped != nullptr);
-      if (need_diag) {
-        // Preserve existing diagnostic semantics for masked-out files.
-        for (size_t j = start; j < next && j < flevel_->num_files; ++j) {
-          if (!file_skip_mask_[j]) {
-            continue;
-          }
-          if (q.file_level_files_considered != nullptr) {
-            ++(*q.file_level_files_considered);
-          }
-          if (q.file_level_files_time_disjoint != nullptr) {
-            ++(*q.file_level_files_time_disjoint);
-          }
-          if (q.file_level_files_space_disjoint != nullptr) {
-            ++(*q.file_level_files_space_disjoint);
-          }
-          if (q.file_level_files_skipped != nullptr) {
-            ++(*q.file_level_files_skipped);
+      EnsureFileLevelRtreeSkipRatioGate();
+      if (!file_level_rtree_gate_use_linear_only_) {
+        EnsureStCandidateFilesFromSkipMask();
+        auto it = std::lower_bound(st_candidate_files_.begin(),
+                                   st_candidate_files_.end(), start);
+        const size_t next =
+            (it == st_candidate_files_.end()) ? flevel_->num_files : *it;
+        const bool need_diag = (q.file_level_files_considered != nullptr) ||
+                               (q.file_level_files_time_disjoint != nullptr) ||
+                               (q.file_level_files_space_disjoint != nullptr) ||
+                               (q.file_level_files_skipped != nullptr);
+        if (need_diag) {
+          // Preserve existing diagnostic semantics for masked-out files.
+          for (size_t j = start; j < next && j < flevel_->num_files; ++j) {
+            if (!file_skip_mask_[j]) {
+              continue;
+            }
+            if (q.file_level_files_considered != nullptr) {
+              ++(*q.file_level_files_considered);
+            }
+            if (q.file_level_files_time_disjoint != nullptr) {
+              ++(*q.file_level_files_time_disjoint);
+            }
+            if (q.file_level_files_space_disjoint != nullptr) {
+              ++(*q.file_level_files_space_disjoint);
+            }
+            if (q.file_level_files_skipped != nullptr) {
+              ++(*q.file_level_files_skipped);
+            }
           }
         }
+        return next;
       }
-      return next;
     }
     if (false && q.enable && q.file_level_enable) {
       EnsureTimeUpperBoundSkipMask();
@@ -1688,6 +1697,43 @@ void LevelIterator::EnsureStCandidateFilesFromSkipMask() const {
     if (!file_skip_mask_[i]) {
       st_candidate_files_.push_back(i);
     }
+  }
+}
+
+void LevelIterator::EnsureFileLevelRtreeSkipRatioGate() const {
+  if (file_level_rtree_gate_evaluated_) {
+    return;
+  }
+  file_level_rtree_gate_evaluated_ = true;
+  file_level_rtree_gate_use_linear_only_ = false;
+  const auto& q = read_options_.experimental_st_prune_scan;
+  if (!q.file_level_rtree_skip_ratio_gate_enable) {
+    return;
+  }
+  EnsureCompactStMeta();
+  size_t eligible = 0;
+  size_t disjoint = 0;
+  for (size_t i = 0; i < flevel_->num_files; ++i) {
+    if (!compact_has_st_meta_[i] || compact_has_range_del_[i]) {
+      continue;
+    }
+    ++eligible;
+    const auto& m = compact_st_meta_[i];
+    const bool time_disjoint = (m.t_max < q.t_min || m.t_min > q.t_max);
+    const bool space_disjoint = (m.x_max < q.x_min || m.x_min > q.x_max ||
+                                 m.y_max < q.y_min || m.y_min > q.y_max);
+    if (time_disjoint || space_disjoint) {
+      ++disjoint;
+    }
+  }
+  if (eligible == 0) {
+    file_level_rtree_gate_use_linear_only_ = true;
+    return;
+  }
+  const float ratio =
+      static_cast<float>(disjoint) / static_cast<float>(eligible);
+  if (ratio < q.file_level_rtree_min_skip_ratio) {
+    file_level_rtree_gate_use_linear_only_ = true;
   }
 }
 
@@ -2224,6 +2270,7 @@ void LevelIterator::SeekForPrev(const Slice& target) {
 void LevelIterator::SeekToFirst() {
   prefix_exhausted_ = false;
   ClearSentinel();
+  dbg_distinct_sst_files_ = 0;
   InitFileIterator(NextForwardFileIndexSkippingStPrune(0));
   if (file_iter_.iter() != nullptr) {
     PrewarmForwardContainsBatch(file_index_);
@@ -2466,6 +2513,16 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
       // file_iter_ is already constructed with this iterator, so
       // no need to change anything
     } else {
+      const auto& dq = read_options_.experimental_st_prune_scan;
+      const size_t prev_file_index = file_index_;
+      if (dq.debug_max_distinct_sst_files > 0 &&
+          new_file_index != prev_file_index &&
+          dbg_distinct_sst_files_ >= dq.debug_max_distinct_sst_files) {
+        file_index_ = flevel_->num_files;
+        SetFileIterator(nullptr);
+        ClearRangeTombstoneIter();
+        return;
+      }
       file_index_ = new_file_index;
       if (!prepared_iters_.empty()) {
         auto prepared_it = prepared_iters_.find(file_index_);
@@ -2473,6 +2530,9 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
           InternalIterator* iter = prepared_it->second;
           prepared_iters_.erase(prepared_it);
           SetFileIterator(iter);
+          if (new_file_index != prev_file_index) {
+            ++dbg_distinct_sst_files_;
+          }
           return;
         }
       }
@@ -2486,6 +2546,9 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
       }
 
       SetFileIterator(iter);
+      if (iter != nullptr && new_file_index != prev_file_index) {
+        ++dbg_distinct_sst_files_;
+      }
     }
   }
 }

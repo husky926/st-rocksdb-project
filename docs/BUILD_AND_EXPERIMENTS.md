@@ -79,10 +79,9 @@ Typical inputs and outputs used by scripts:
   - **SST-count layout (default for `docs/st_ablation_wuxi_1sst_vs_manysst.html`):**
     - `data/verify_wuxi_segment_1sst` — **1** SST
     - `data/verify_wuxi_segment_164sst` — **164** SST
-    - `data/verify_wuxi_segment_776sst` — target **776** SST (if missing, scripts may fall back to `verify_wuxi_segment_736sst` with a warning; see root tracking doc)
+    - **`data/verify_wuxi_segment_bucket3600_sst`** — **third tier (canonical name):** hourly (**3600s**) bucket ingest; live **`N` SST** is data-dependent (often ~700+). Legacy names `verify_wuxi_segment_776sst` / `..._736sst` may still appear on disk; scripts resolve via `tools/wuxi_resolve_third_tier_fork.ps1`.
   - **Build-style names (still used by some scripts, e.g. dual-regime):**
     - `data/verify_wuxi_segment_manysst`: Wuxi DB with ~**164 SST** (many small SSTs)
-    - `data/verify_wuxi_segment_bucket3600_sst`: Wuxi DB bucketed by 3600s (expected **736 SST**)
     - `data/verify_wuxi_segment_full`: optional single-SST baseline name (if you build it)
 
 - **Experiment outputs**
@@ -139,13 +138,13 @@ Count SST files:
 (Get-ChildItem -LiteralPath "D:\Project\data\verify_wuxi_segment_bucket3600_sst" -Filter "*.sst" -File | Measure-Object).Count
 ```
 
-Expected: `736`
+Expected: **`N`** (for default Wuxi processed CSVs, often near **736**, not guaranteed)
 
 ---
 
 ## 5) Experiment windows (12-window baseline)
 
-**Preferred for validated comparisons:** `tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv` — 12 windows, each bench-checked on 1-SST DB with `full_keys >= 50` (see `tools/generate_wuxi_random_windows_validated.py`).
+**Preferred for validated comparisons:** `tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv` — 12 stratified windows (4 narrow + 4 medium + 4 wide), validated with `tools/validate_wuxi_windows_csv.py`. Legacy: `random12_cov_s42` (`generate_wuxi_random_windows_validated.py`).
 
 **Fallbacks:**
 

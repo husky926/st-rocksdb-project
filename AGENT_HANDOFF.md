@@ -1,6 +1,6 @@
 # Project handoff / 会话恢复用（给 AI 与维护者）
 
-> **用途**：网络重连后先读本文 + `Record.md`，可快速对齐目标与进度；**实验脚本、无锡三库路径**以 **`EXPERIMENTS_AND_SCRIPTS.md`** 为准；**开跑前硬性约定**（三模式 × **Fork 侧**三 SST 档、12 窗禁空窗、**Vanilla vs Fork-full 基线**）见该文件 **§0** 与 **`docs/VANILLA_ROCKSDB_BASELINE.md`**。  
+> **用途**：网络重连后先读本文 + `Record.md`，可快速对齐目标与进度；**实验脚本、无锡三库路径**以 **`EXPERIMENTS_AND_SCRIPTS.md`** 为准（**默认查询时空窗：无锡**，见该文件 **§0.5**）；**开跑前硬性约定**（三模式 × **Fork 侧**三 SST 档、12 窗禁空窗、**Vanilla vs Fork-full 基线**）见该文件 **§0** 与 **`docs/VANILLA_ROCKSDB_BASELINE.md`**。  
 > **Vanilla 基线（原生态）**：**单一**官方 RocksDB 目录，**加工轨迹数据一次灌入**，**不**复制 fork 的 1 / 164 / 多 SST 三档；**主指标 = 同窗查询壁钟**（`vanilla_wall_us`）。**无锡 Vanilla 壁钟 / `-VanillaAsBaseline`**：`st_segment_window_scan_vanilla` 须打开 **真实可迭代的 V 目录**（过渡期为 `*_vanilla_replica` 等；`cache_wuxi_vanilla_wall_baseline.ps1` 的 JSON 键须与打开路径一致）；在 **fork 段库路径**上直接跑 Vanilla 常无有效 `wall_us`，TSV 会出现 **`vanilla_as_baseline_unavailable`**。  
 > **查询真值（全队统一）**：轨迹段查询的 **正确命中** = 段内 **至少有一点**落在查询时空窗内；命中后返回 **整段**。**仅 MBR（或段 key 内包围盒）与窗相交、但无点在窗内** = **假阳性，视为错误**，不得作为正式正确结果。**权威定义与 bench 现状差异**见 **`EXPERIMENTS_AND_SCRIPTS.md` §0.1a**。  
 > **维护**：重大实验、架构或路径变更后，请追加或修订「当前状态」「下一步」；**读路径 / Method 级改造**同步 **§8**。  
@@ -109,8 +109,8 @@ st_meta_smoke.exe --db D:\Project\data\verify_traj_st_full --csv D:\Project\data
 REM Manifest 看键（hex）
 D:\Project\rocksdb\build\tools\ldb.exe manifest_dump --db=D:\Project\data\verify_traj_st_keys --verbose --hex
 
-REM 真实读基准（默认宽窗与下面 diag 一致）
-D:\Project\rocks-demo\build\st_meta_read_bench.exe --db D:\Project\data\verify_traj_st_full --prune-t-min 1224600000 --prune-t-max 1224800000 --prune-x-min 116.2 --prune-x-max 116.4 --prune-y-min 39.9 --prune-y-max 40.1
+REM 真实读基准（默认剪枝窗 = 无锡 wx_strat_narrow_01，与 §0.5 / stratified12 CSV 首档一致；可省略 --prune-*）
+D:\Project\rocks-demo\build\st_meta_read_bench.exe --db D:\Project\data\verify_wuxi_segment_bucket3600_sst
 
 REM 与 bench 同窗的块级/文件级诊断（先编 st_meta_sst_diag）
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\st_diag_align_read_bench.ps1
@@ -192,6 +192,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\st_manifest
 ## 8. Method：本 fork 读路径改造（论文 Method 可据此扩写）
 
 下列与 **RocksDB `ReadOptions.experimental_st_prune_scan`** 及 **ST 文件/块元数据** 相关；实现主要在 **`rocksdb/db/version_set.cc`**（`LevelIterator`）与 **`rocksdb/table/block_based/block_based_table_iterator.cc`** 等。写论文时按小节拆成「数据结构 → 判定条件 → 迭代器挂钩点」即可。
+
+### 8.0 原生 RocksDB：范围扫描读路径（对比基线，未加 ST 剪枝时）
+
+**目的**：说明 **`DB::NewIterator` + `SeekToFirst`/`Seek` + `Next`** 在 **官方语义**下大致经过哪些模块与文件，便于读者把 **§8.1–8.4 的 fork 改造**叠在这条链路上理解（「在哪一层插入了时空判定、省掉了什么 IO」）。
+
+**典型调用链（列族迭代器、前向扫描）**
+
+1. **API 入口**  
+   - **`rocksdb/db/db_impl/db_impl.cc`**：`DBImpl::NewIterator`（只读路径下可能经 **`DBImplReadOnly`**，见 **`db_impl_readonly.cc`**）构造 **`ArenaWrappedDBIter`** / 内部 **`DBIter`**，底层持有一个 **合并迭代器**。
+
+2. **跨层合并**  
+   - **`rocksdb/table/merging_iterator.cc`**（及 **`db/db_iter.cc`** 对 `DBIter` 的封装）：把 **MemTable**、**immutable memtable**、以及 **L0…Ln 各层** 的 **子迭代器** 按 **内序比较** 合并为单一逻辑视图。用户看到的 `Next()` 在这里被 **分发到某一层的当前子迭代器**。
+
+3. **单层 SST 序列（本 fork 文件级剪枝的挂载点）**  
+   - **`rocksdb/db/version_set.cc`**：**`LevelIterator`**（匿名命名空间内类）。  
+   - 根据 **当前 key 范围** 在 **`LevelFilesBrief`** 上 **选择下一个 SST**（`FindFile` / 顺序下标），通过 **`TableCache::NewIterator`**（**`db/table_cache.cc`**）打开 **BlockBasedTable** 上的 **`BlockBasedTableIterator`**。  
+   - **原生行为**：只要 key 范围仍可能落在该文件内，就会 **打开表**；**没有**「文件级时空外包与查询窗不相交则跳过打开」的逻辑。
+
+4. **单个 SST 内部（本 fork 块级/键级剪枝的挂载点）**  
+   - **`rocksdb/table/block_based/block_based_table_reader.{h,cc}`**：表读取器；负责 **footer、meta index、properties** 等。  
+   - **索引**：未分区时走 **`rocksdb/table/block_based/block_based_table_iterator.cc`** 的索引迭代；**分区索引**时还有 **`partitioned_index_iterator.cc`**。索引块通常经 **block cache**（`rocksdb/cache/`）或 **文件读** 装入。  
+   - **数据块**：`BlockBasedTableIterator` 在索引上定位后 **读 data block**（同样走 **block cache / `RandomAccessFileReader`**）。  
+   - **可选**：**filter block**（Bloom 等）在 **`table/block_based/filter_block.cc`** 及相关路径；**compression** 在块解码时涉及 **`table/format.cc`** 等。
+
+5. **I/O 与统计**  
+   - 环境抽象：**`rocksdb/env*.cc`**、**`file/random_access_file_reader.cc`**。  
+   - 本仓库 bench 读的 **PerfContext / IOStatsContext** 在迭代过程中累计 **block read 次数、字节、read_nanos** 等。
+
+**与 fork 的对应关系（一句话）**  
+- **Global（§8.2–8.3）**：改在 **`LevelIterator`** —— 在 **仍使用 `TableCache` 之前** 决定是否 **跳过整个 SST**。  
+- **Local（§8.4）**：改在 **`BlockBasedTableIterator`（及分区索引）** —— 在 **已打开表** 的前提下，减少 **数据块读取** 与 **向上合并迭代器暴露的 key 数**。
+
+**注意**：**点查 `Get` / `MultiGet`** 走 **sst 文件选择 + block cache** 的另一条链（`Version::Get`、`table_cache`、`GetContext` 等），**本 fork 当前未做** 文件级 ST 剪枝；**反向 `Prev`** 与部分 **Seek** 路径 **也不套用** 前向文件级跳过逻辑（见 §8.2）。
 
 ### 8.1 文件级时空元数据（Manifest / `FileMetaData`）
 

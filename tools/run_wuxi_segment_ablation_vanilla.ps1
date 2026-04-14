@@ -9,7 +9,7 @@
 #
 param(
   [string]$OutDir = "",
-  [switch]$VerifyKVResults,
+  [switch]$SkipVerifyKVResults,
   [switch]$SummarizePooled
 )
 
@@ -42,6 +42,6 @@ $args = @(
 if (-not [string]::IsNullOrWhiteSpace($OutDir)) {
   $args += "-OutDir"; $args += $OutDir
 }
-if ($VerifyKVResults.IsPresent) { $args += "-VerifyKVResults" }
+if ($SkipVerifyKVResults.IsPresent) { $args += "-SkipVerifyKVResults" }
 if ($SummarizePooled.IsPresent) { $args += "-SummarizePooled" }
 & powershell @args

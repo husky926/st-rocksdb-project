@@ -1,0 +1,13 @@
+Label,TMin,TMax,XMin,XMax,YMin,YMax,Note
+wx_strat_narrow_01,1596200000,1596203600,120.020000,120.340000,31.520000,31.880000,tier=narrow 1h ~0.32x0.36deg quadrant NW in sharp_spatiotemporal box
+wx_strat_narrow_02,1596200000,1596203600,120.280000,120.600000,31.480000,31.950000,tier=narrow 1h ~0.32x0.47deg quadrant NE in sharp box
+wx_strat_narrow_03,1596200000,1596203600,120.000000,120.360000,31.400000,31.720000,tier=narrow 1h ~0.36x0.32deg quadrant SW in sharp box
+wx_strat_narrow_04,1596200000,1596203600,120.180000,120.600000,31.550000,31.950000,tier=narrow 1h ~0.42x0.40deg SE corner expanded for key>=50 on 1sst
+wx_strat_medium_01,1596198000,1596211200,119.520000,120.220000,31.200000,31.820000,tier=medium ~3.7h ~0.70x0.62deg (widened vs v1 for key floor)
+wx_strat_medium_02,1596200000,1596212000,119.820000,120.380000,31.320000,31.920000,tier=medium ~3.3h; overlaps sharp envelope
+wx_strat_medium_03,1596197400,1596209400,119.680000,120.280000,31.400000,32.000000,tier=medium ~3.3h; slight north shift
+wx_strat_medium_04,1596201200,1596213200,120.050000,120.620000,31.180000,31.760000,tier=medium ~3.3h; south-west to mid core
+wx_strat_wide_01,1596177600,1596225600,118.800000,121.200000,30.800000,32.800000,tier=wide ~12h ~2.4x2.0deg; NOT full dataset bbox
+wx_strat_wide_02,1596168000,1596232800,118.200000,121.800000,30.500000,33.200000,tier=wide ~18h ~3.6x2.7deg
+wx_strat_wide_03,1596180000,1596223200,119.000000,122.500000,30.200000,33.500000,tier=wide ~12h; elongated E-W
+wx_strat_wide_04,1596163200,1596237600,117.800000,123.000000,30.000000,34.000000,tier=wide ~20h ~5.2x4deg; max tier still below full-envelope

@@ -55,12 +55,12 @@
 ### 2.1 消融结构（Fork 侧）
 
 - **三模式（`PruneMode`）**：`sst`（Local）、`manifest`（Global）、`sst_manifest`（Local+Global）。  
-- **三 SST 布局（仅 Fork 物理库）**：`verify_wuxi_segment_1sst`、`verify_wuxi_segment_164sst`、第三档为 **按时间分桶的多 SST**（默认目录名 `verify_wuxi_segment_776sst`，缺则回退 `verify_wuxi_segment_736sst`；**数字仅为文件夹名**，论文应写 **实际 `*.sst` 计数 + 建库参数如 3600s 桶**）。  
+- **三 SST 布局（仅 Fork 物理库）**：`verify_wuxi_segment_1sst`、`verify_wuxi_segment_164sst`、第三档为 **按 3600s（1 小时）事件时间分桶的多 SST**（**推荐目录名** `verify_wuxi_segment_bucket3600_sst`；`tools/wuxi_resolve_third_tier_fork.ps1` 可解析到历史名 `776sst`/`736sst`）。**`N` 个 SST 以实测为准**；论文写 **3600s 桶 + `N=`**。  
 - **基线**：**Fork full（F0）** = `st_meta_read_bench` 关闭 `experimental_st_prune_scan` 的全表路径；**Vanilla（V）** = 上游 `rocksdb_vanilla`，与 Fork 三档 **脱钩**（单一灌库目录，主指标为 **同窗 `wall_us`**）。见 `VANILLA_ROCKSDB_BASELINE.md` **§1.1**。
 
 ### 2.2 查询窗
 
-- **首选**：`tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv`（12 窗；在 1-SST 上验证过 **bench 口径** `full_keys ≥ 50`）。  
+- **首选**：`tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv`（12 窗 4/4/4 分层；`validate_wuxi_windows_csv.py`）。Legacy：`random12_cov_s42`。  
 - 列：`Label,TMin,TMax,XMin,XMax,YMin,YMax,Note`（时间为 **uint32 秒** 等约定与 bench 一致）。
 
 ### 2.3 点级真值 vs 当前 bench（§0.1a / AGENT §1.0a）

@@ -11,7 +11,7 @@
 
 param(
   [string]$ParentOutDir = "",
-  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_776sst",
+  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_bucket3600_sst",
   [string]$WindowsCsv = "",
   [string]$VanillaWallCacheJson = "",
   [uint32]$TimeBucketCount = 736,
@@ -28,16 +28,16 @@ if ([string]::IsNullOrWhiteSpace($ToolsDir)) {
 $RootDir = Resolve-Path (Join-Path $ToolsDir "..")
 $Sweep = Join-Path $ToolsDir "st_prune_vs_full_baseline_sweep.ps1"
 
-$p776 = Join-Path $RootDir "data\verify_wuxi_segment_776sst"
-$p736 = Join-Path $RootDir "data\verify_wuxi_segment_736sst"
-if ($RocksDbPathsCsv -match "776sst" -and -not (Test-Path -LiteralPath $p776) -and (Test-Path -LiteralPath $p736)) {
-  Write-Warning "verify_wuxi_segment_776sst not found; using verify_wuxi_segment_736sst."
-  $RocksDbPathsCsv = $RocksDbPathsCsv.Replace("verify_wuxi_segment_776sst", "verify_wuxi_segment_736sst")
-}
+. (Join-Path $ToolsDir "wuxi_resolve_third_tier_fork.ps1")
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $RootDir "data"))
+$r3 = Get-WuxiResolvedThirdTierCsv -RocksDbPathsCsv $RocksDbPathsCsv -DataRoot $dataRoot
+$RocksDbPathsCsv = $r3.RocksDbPathsCsv
 
+$Stratified12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv"
 $Random12Cov = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_cov_s42.csv"
 if ([string]::IsNullOrWhiteSpace($WindowsCsv)) {
-  $WindowsCsv = $Random12Cov
+  if (Test-Path -LiteralPath $Stratified12) { $WindowsCsv = $Stratified12 }
+  else { $WindowsCsv = $Random12Cov }
 }
 if ([string]::IsNullOrWhiteSpace($VanillaWallCacheJson)) {
   $VanillaWallCacheJson = Join-Path $RootDir "data\experiments\wuxi_vanilla_wall_cache.json"

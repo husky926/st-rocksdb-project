@@ -82,7 +82,7 @@ Fork 产出的 `verify_wuxi_segment_*` 可能包含：
 
 ## 5. Phase 2 — 统一 workload（与现有 12 cov 窗对齐）
 
-- **窗 CSV**：`tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv`（及 `EXPERIMENTS_AND_SCRIPTS.md` §0.3 规则）。  
+- **窗 CSV**：`tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv`（正式默认；`EXPERIMENTS_AND_SCRIPTS.md` §0.3）。切换窗后须重跑 `cache_wuxi_vanilla_wall_baseline.ps1`。Legacy：`random12_cov_s42`。  
 - **扫描语义**：与当前 `st_meta_read_bench` 的 `--full-scan-mode window` 一致 —— 全表迭代，user key 解码后对窗计数（**V** 与 **F0** 必须使用 **同一套** 段 key 解码逻辑；实现上可将 **仅解码 + 窗判定** 放到 **header-only 或极小共享源**，由 vanilla 与 fork 各编一次，避免行为漂移）。  
 - **IO 统计**：V 与 F0/F* 均记录 `wall_us`、`block_read_count`、IOStats `bytes_read`（若官方 API 可接 PerfContext/IOStatsContext，与 fork 对齐字段名便于汇总）。
 

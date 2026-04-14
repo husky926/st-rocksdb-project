@@ -207,7 +207,9 @@ function Invoke-BenchPair {
     "--prune-mode", $PruneMode,
     "--full-scan-mode", $FullScanMode
   )
-  if ($PruneMode -eq "manifest_timebucket_rtree") {
+  # manifest (Global) now defaults to bucket+R-tree in bench; must pass counts (defaults 32 mismatch Wuxi 736 layout).
+  if ($PruneMode -eq "manifest" -or $PruneMode -eq "manifest_timebucket_rtree" -or
+      $VirtualMerge.IsPresent -or $VirtualMergeAuto.IsPresent) {
     $args += @("--time-bucket-count", "$TimeBucketCount", "--rtree-leaf-size", "$RTreeLeafSize")
   }
   if ($PruneMode -eq "sst_manifest") {
@@ -224,27 +226,43 @@ function Invoke-BenchPair {
   }
   if ($VirtualMerge.IsPresent) {
     $args += "--virtual-merge"
-    $args += @("--time-bucket-count", "$TimeBucketCount", "--rtree-leaf-size", "$RTreeLeafSize")
   }
   if ($VirtualMergeAuto.IsPresent) {
     $args += "--virtual-merge-auto"
     $args += @("--vm-time-span-sec-threshold", "$VmTimeSpanSecThreshold")
-    $args += @("--time-bucket-count", "$TimeBucketCount", "--rtree-leaf-size", "$RTreeLeafSize")
   }
   $args += @("--vm-contains-batch-prewarm", "$VmContainsBatchPrewarm")
   if ($IteratorRepeat -gt 1) {
     $args += @("--iterator-repeat", "$IteratorRepeat")
   }
+  # Optional: fork full+prune KV verify while using Vanilla wall as *ratio* baseline.
+  # Vanilla path uses --no-full-scan, so verify must run as a separate bench invocation on fork DB.
+  $kv_verify_correct = ""
+  $kv_verify_full = ""
+  $kv_verify_prune = ""
+  if ($VerifyKVResults.IsPresent -and $VanillaAsBaseline.IsPresent) {
+    $vargs = [System.Collections.Generic.List[string]]::new()
+    foreach ($a in $args) {
+      if ($a -eq "--no-full-scan") { continue }
+      $vargs.Add($a)
+    }
+    $vargs.Add("--verify-kv-results")
+    Write-Host "  (fork full+prune --verify-kv-results for KV self-check vs Vanilla baseline row)" -ForegroundColor DarkGray
+    $rawV = & $Bench ($vargs.ToArray()) 2>&1 | Out-String
+    if ($rawV -match 'verify_kv_results correctness=(OK|FAIL) full_inwindow_kv=(\d+) prune_inwindow_kv=(\d+)') {
+      $kv_verify_correct = $Matches[1]
+      $kv_verify_full = $Matches[2]
+      $kv_verify_prune = $Matches[3]
+    } elseif ($rawV -match 'verify_kv_results correctness=(OK|FAIL)') {
+      $kv_verify_correct = $Matches[1]
+    }
+  }
+
   if ($VanillaAsBaseline.IsPresent) {
     $args += "--no-full-scan"
   }
   if ($VerifyKVResults.IsPresent -and -not $VanillaAsBaseline) {
     $args += "--verify-kv-results"
-  } elseif ($VerifyKVResults.IsPresent -and $VanillaAsBaseline) {
-    if (-not $script:WarnedVerifyVanilla) {
-      Write-Warning "VerifyKVResults ignored with -VanillaAsBaseline (fork full scan is skipped)."
-      $script:WarnedVerifyVanilla = $true
-    }
   }
   $raw = & $Bench @args 2>&1 | Out-String
 
@@ -323,6 +341,11 @@ function Invoke-BenchPair {
     $kv_full = $Matches[2]
     $kv_prune = $Matches[3]
   }
+  if ($kv_correct -eq "" -and $kv_verify_correct -ne "") {
+    $kv_correct = $kv_verify_correct
+    $kv_full = $kv_verify_full
+    $kv_prune = $kv_verify_prune
+  }
   if ($fk -ne "" -and $fb -ne "" -and $pb -ne "") {
     try {
       $dfb = [double]$fb; $dpb = [double]$pb
@@ -386,7 +409,6 @@ if (-not [string]::IsNullOrWhiteSpace($VanillaWallDbPathsCsv)) {
   )
 }
 
-$script:WarnedVerifyVanilla = $false
 $rows = Import-Csv -LiteralPath $WindowsCsv
 $all = @()
 for ($di = 0; $di -lt $RocksDbPaths.Count; $di++) {

@@ -44,18 +44,26 @@
 
 ## 接下来要干什么（当前共识）
 
-1. **真实读路径 IO（已加第一步工具）**：`rocks-demo` 新增 **`st_meta_read_bench`**：对 **已有 ST 键库**（如 `verify_traj_st_full`）**不删不建**，测量 **全表迭代** vs **`ReadOptions::experimental_st_prune_scan`** 的 **墙钟时间**、**`PerfContext::block_read_count`**、**`IOStatsContext::bytes_read` / `read_nanos`** 及 **Statistics 缓存命中**。见下文「命令」。**仍待做**：与 **Manifest 级 file ST 元数据** 联合剪枝（若与块级剪枝并列）、以及 **多查询循环 / 冷缓存协议** 固化。  
+1. **真实读路径 IO（已加第一步工具）**：`rocks-demo` 新增 **`st_meta_read_bench`**：对 **已有 ST 库**（**默认示例 DB / 窗**：无锡段库 + **`EXPERIMENTS_AND_SCRIPTS.md` §0.5**）**不删不建**，测量 **全表迭代** vs **`ReadOptions::experimental_st_prune_scan`** 的 **墙钟时间**、**`PerfContext::block_read_count`**、**`IOStatsContext::bytes_read` / `read_nanos`** 及 **Statistics 缓存命中**。见下文「命令」。**仍待做**：与 **Manifest 级 file ST 元数据** 联合剪枝（若与块级剪枝并列）、以及 **多查询循环 / 冷缓存协议** 固化。  
 2. **真实 Manifest / Version**：**（部分落地）** `FileMetaData` 已含 **`has_st_file_meta` + `st_file_meta`**（与块尾同构），经 **`kNewFile4` custom tag 17** 写入 MANIFEST；来源为 flush/compaction 输出 SST 的 **`rocksdb.experimental.st_file_bounds`**（由开启 **`experimental_spatio_temporal_meta_in_index_value`** 时的索引构建聚合）。**仍待做**：Version 读路径 **按查询窗剪枝**、内存 **时间桶 + R 树**、**`OpenTable` 计数** 与合成工具对齐。  
 3. **合成工具**：继续用 **尖查询参数** 扫 `files` / `bucket-width` / 查询窗；同时看 **`brute/indexed`（CPU）** 与 **`weighted_brute/indexed`（`--open-ns`）**；与 **选择性** 及 **Open 成本假设** 对齐（**不等价**于真实 IO，与 **`st_meta_read_bench`** 互补）。  
 4. **Compaction 事件时间切分**：若仍要验证 SST 切分形态，保持 **`CompactFiles` 或禁用 trivial move** 的路径，避免再次被 trivial move 短路。
 
-**`st_meta_read_bench` 示例（先 `cmake --build` `--target st_meta_read_bench`）**：
+**`st_meta_read_bench` 示例（先 `cmake --build` `--target st_meta_read_bench`）** — 默认剪枝窗已为 **无锡 w01**（见 **`EXPERIMENTS_AND_SCRIPTS.md` §0.5**）；仅传 `--db` 即可与文档默认对齐：
 
 ```text
-rocks-demo\build\st_meta_read_bench.exe --db D:\Project\data\verify_traj_st_full ^
-  --prune-t-min 1224600000 --prune-t-max 1224800000 ^
-  --prune-x-min 116.2 --prune-x-max 116.4 --prune-y-min 39.9 --prune-y-max 40.1
+rocks-demo\build\st_meta_read_bench.exe --db D:\Project\data\verify_wuxi_segment_bucket3600_sst
 ```
+
+显式写出与 cov CSV 首行相同的窗（可选）：
+
+```text
+rocks-demo\build\st_meta_read_bench.exe --db D:\Project\data\verify_wuxi_segment_bucket3600_sst ^
+  --prune-t-min 1596200108 --prune-t-max 1596201324 ^
+  --prune-x-min 111.788384 --prune-x-max 127.462201 --prune-y-min 28.777820 --prune-y-max 38.854327
+```
+
+**Legacy（Geolife 点库对照）**：`verify_traj_st_full` + 旧北京窗仅用于历史复现，**不再作为项目默认测试窗**；见 §0.5。
 
 仅跑剪枝路径、跳过全表（大库省时）：加 **`--no-full-scan`**。加大缓存减轻重复读盘： **`--large-cache`** 或 **`--block-cache-mb 256`**。
 
@@ -538,7 +546,7 @@ D:\Project\rocksdb\build\tools\st_meta_sst_diag.exe --window 1224600000 12248000
 | 项 | 内容 |
 |----|------|
 | **目的** | 单独跑一轮 Local+Global，确认路径可用；整理本 fork 相对 **上游 RocksDB** 的增量部件（与效率无关的说明向汇总）。 |
-| **命令** | `st_prune_vs_full_baseline_sweep.ps1`，`-PruneMode sst_manifest`，`-VerifyKVResults`，`-RocksDbPaths data/verify_wuxi_segment_1sst`，`-WindowsCsv tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv`，与无锡主脚本一致的 VM/736 桶/adaptive gate 参数。 |
+| **命令** | `st_prune_vs_full_baseline_sweep.ps1`，`-PruneMode sst_manifest`，`-VerifyKVResults`，`-RocksDbPaths data/verify_wuxi_segment_1sst`，`-WindowsCsv tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv`（正式默认；历史跑次曾为 `random12_cov_s42`），与无锡主脚本一致的 VM/736 桶/adaptive gate 参数。 |
 | **产出** | `data/experiments/wuxi_lg_only_single_run/ablation_sst_manifest.tsv`（12 窗）、`run_meta.json`；**kv_correct 12/12 OK**。 |
 | **与 vanilla 对照** | 见当次对话中的分层汇总（manifest 文件元数据 + LevelIterator 跳过 + 可选桶内 R-tree；SST 内块/索引与 user key 级 ST 判定；ReadOptions 子开关；段式 key 与建库工具链）；**full scan** 指 fork 内关剪枝的同一二进制，**不等于**未改 schema 的上游库上的同一 workload。 |
 
@@ -554,4 +562,27 @@ D:\Project\rocksdb\build\tools\st_meta_sst_diag.exe --window 1224600000 12248000
 | **HTML** | `docs/st_ablation_wuxi_1sst_vs_manysst.html`（已由 `refresh_wuxi_ablation_chart_html.py` 更新；说明段含缓存路径与父目录）。 |
 | **注意** | **`VanillaAsBaseline` 时 `-VerifyKVResults` 不跑 fork full**，聚合表「准确性」为未做 full↔prune KV 对拍；剪枝自洽需另跑不带 Vanilla 基线的 sweep。 |
 | **是否达到预期** | **是**：Vanilla 查询开销已持久化进 JSON + 多 run TSV + 聚合与图；与 **§0.1a** 点级真值无关时仍以 MBR 口径理解 `full_keys`。 |
+
+## 2026-04-12 — 文件级 R-tree skip-ratio 门控 A/B（无锡 w01 + bucket3600，`iterator_repeat=50`）
+
+| 项 | 内容 |
+|----|------|
+| **验证目的** | 验证 `ReadOptions::experimental_spatio_temporal_prune_scan` 中 **`file_level_rtree_skip_ratio_gate_enable`** / **`file_level_rtree_min_skip_ratio`**：当 **`disjoint/eligible`** 低于阈值时跳过 per-level bucket+BVH、回退线性文件级 disjoint；在 **无锡多 SST 段库** 上与关门控对比 **壁钟与 IO**。 |
+| **库与窗** | DB：**`D:\Project\data\verify_wuxi_segment_bucket3600_sst`**。窗：**`wx_strat_narrow_01`**（`tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv`）：`t=[1596200000,1596203600]`，`x=[120.02,120.34]`，`y=[31.52,31.88]`。 |
+| **命令** | `--prune-mode manifest --time-bucket-count 736 --rtree-leaf-size 8 --iterator-repeat 50`；**A** 无 gate；**B** 加 **`--file-level-rtree-skip-ratio-gate --file-level-rtree-min-skip-ratio 0.2`**。 |
+| **验证结果** | **`keys(last_iter)=752`**、**`keys_in_window=60`**、**`block_read_count=600`**、**`bytes_read=221249950`** 两组一致。**`wall_us_per_iter_avg`**：**关门控 3642.78µs**，**开门控 3037.45µs**（约 **−16.6%**）；累计 **`read_nanos`**：**70037400 vs 58895400**。**`prune_file_skipped=730`**，**`time_disjoint=730`**（736 文件中 730 个时间维与窗不相交）。 |
+| **是否符合期望** | **是**：键与 IO 规模不变；门控无退化；该高选择性窗下平均壁钟更低。 |
+| **原因** | 文件级剪枝已能跳过绝大多数 SST；门控避免在低收益场景维持 BVH 构建路径的开销，50 次重复后趋势稳定。 |
+| **团队约定** | **`EXPERIMENTS_AND_SCRIPTS.md` §0.5**：正式 ST 读路径测试 **默认无锡 stratified 窗**；**`st_meta_read_bench` 默认 `--prune-*`** = **`wx_strat_narrow_01`**（**Geolife 窗不再作为项目默认**）。 |
+
+## 2026-04-12 — 正式 12 窗切换为 stratified12 + 工具链默认 + Vanilla 缓存须重建
+
+| 项 | 内容 |
+|----|------|
+| **实验目的** | 将 **`tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv`**（4 窄 + 4 中 + 4 宽）定为 **唯一正式默认 12 窗**；消融与 Vanilla 壁钟缓存与 **`st_meta_read_bench` 默认单窗**（`wx_strat_narrow_01`）全部对齐。 |
+| **代码与脚本** | **`run_wuxi_segment_ablation_1_164_776.ps1`**、**`cache_wuxi_vanilla_wall_baseline.ps1`**、**`run_wuxi_vanilla_cached_ablation_batch.ps1`**、**`run_wuxi_random12_vm_p50_ablation.ps1`**、**`run_wuxi_global_vm_auto_vs_vanilla.ps1`**：未传 **`-WindowsCsv`** 时 **优先 stratified12**。**`st_meta_read_bench.cpp`** 默认 `--prune-*` = narrow_01。文档：**`EXPERIMENTS_AND_SCRIPTS.md`**（§0.3 / §0.5 / §2.2）、**`AGENT_HANDOFF`**、**`REPRODUCTION`**、**`VANILLA_ROCKSDB_BASELINE`**、**`BUILD_AND_EXPERIMENTS`** 已同步。 |
+| **Vanilla** | **更换窗 CSV 后必须重跑** **`cache_wuxi_vanilla_wall_baseline.ps1`**（对 `*_vanilla_replica` 路径，与消融 replica 对齐），再跑 **`run_wuxi_segment_ablation_1_164_776.ps1 -VerifyKVResults`**（默认即 Vanilla 基线，除非 **`-AllowForkFullBaseline`**）。 |
+| **消融重跑命令（单次 + 汇总）** | ① **`cache_wuxi_vanilla_wall_baseline.ps1`** 的 **`-RocksDbPathsCsv`** 须指向 **`*_vanilla_replica`**（三档与 fork 对齐）。② **`run_wuxi_segment_ablation_1_164_776.ps1 -SummarizePooled`**；**`-VerifyKVResults`** 在 **`VanillaAsBaseline` 时不会跑 fork full↔prune 对拍**（脚本会告警），剪枝自洽需另跑 **不带 Vanilla 基线** 的 sweep。 |
+| **本机已执行（2026-04-12）** | 缓存：**`wuxi_vanilla_wall_cache.json`** 重建 **36** 条（stratified12 × 3 replica，`RepeatCount=3`）。消融目录：**`data/experiments/wuxi_ablation_stratified12_vanilla_20260412`**（`wuxi_ablation_run_meta.json` 中 **`windows_csv`=stratified12**、**`compare_baseline`=vanilla**、**736 回退**）。`summarize_wuxi_ablation_three_modes.py --pooled-by-db` 已写入同目录 **`pooled_p50_summary.txt`**（含 Vanilla/prune 比）。 |
+| **是否达到预期** | **是**：正式窗与工具链默认已切换；Vanilla 缓存与三模式消融已用新 12 窗跑通。 |
 

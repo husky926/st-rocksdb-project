@@ -1,5 +1,7 @@
 # Build a JSON cache of upstream Vanilla RocksDB segment-window wall_us (median over N repeats)
 # for each (db path, window row) in the same Windows CSV used by the Wuxi ablation sweep.
+# **If you change the canonical windows CSV** (e.g. switch to stratified12), rebuild this cache or
+# Vanilla columns in sweep will miss / mismatch geometry vs old JSON.
 # Ablation runs can pass -VanillaWallCacheJson to st_prune_vs_full_baseline_sweep.ps1 to skip re-invoking vanilla.exe.
 # Use -RocksDbPathsCsv pointing at **Vanilla-readable** dirs (e.g. *_vanilla_replica), same strings as sweep's
 # VanillaWallDbPathsCsv / run_wuxi auto replica paths — not fork-only paths if upstream cannot open them.
@@ -10,7 +12,7 @@
 
 param(
   [string]$WindowsCsv = "",
-  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_776sst",
+  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_bucket3600_sst",
   [string]$VanillaSegmentBenchExe = "",
   [string]$OutJson = "",
   [int]$RepeatCount = 10
@@ -29,11 +31,13 @@ if (-not (Test-Path -LiteralPath $VanillaSegmentBenchExe)) {
   throw "Missing vanilla bench: $VanillaSegmentBenchExe (build rocksdb_vanilla / bootstrap_rocksdb_vanilla.ps1)"
 }
 
+$Stratified12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv"
 $Random12Cov = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_cov_s42.csv"
 $Random12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_s42.csv"
 $LegacyWindows = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi.csv"
 if ([string]::IsNullOrWhiteSpace($WindowsCsv)) {
-  if (Test-Path -LiteralPath $Random12Cov) { $WindowsCsv = $Random12Cov }
+  if (Test-Path -LiteralPath $Stratified12) { $WindowsCsv = $Stratified12 }
+  elseif (Test-Path -LiteralPath $Random12Cov) { $WindowsCsv = $Random12Cov }
   elseif (Test-Path -LiteralPath $Random12) { $WindowsCsv = $Random12 }
   else { $WindowsCsv = $LegacyWindows }
 }
@@ -41,14 +45,11 @@ if (-not (Test-Path -LiteralPath $WindowsCsv)) {
   throw "Missing: $WindowsCsv"
 }
 
-$p776 = "D:\Project\data\verify_wuxi_segment_776sst"
-$p736 = "D:\Project\data\verify_wuxi_segment_736sst"
-$used736Fallback = $false
-if ($RocksDbPathsCsv -match "776sst" -and -not (Test-Path -LiteralPath $p776) -and (Test-Path -LiteralPath $p736)) {
-  Write-Warning "verify_wuxi_segment_776sst not found; using verify_wuxi_segment_736sst for cache build."
-  $RocksDbPathsCsv = $RocksDbPathsCsv.Replace("verify_wuxi_segment_776sst", "verify_wuxi_segment_736sst")
-  $used736Fallback = $true
-}
+. (Join-Path $ToolsDir "wuxi_resolve_third_tier_fork.ps1")
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $ToolsDir "..\data"))
+$r3 = Get-WuxiResolvedThirdTierCsv -RocksDbPathsCsv $RocksDbPathsCsv -DataRoot $dataRoot
+$RocksDbPathsCsv = $r3.RocksDbPathsCsv
+$used736Fallback = ($r3.ResolvedThirdPath -match "verify_wuxi_segment_736sst$")
 
 $RocksDbPaths = @(
   $RocksDbPathsCsv.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 }

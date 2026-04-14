@@ -1,12 +1,12 @@
-# Full ablation: st_meta_read_bench over Wuxi segment DBs (default **1 / 164 / third multi-SST** paths).
-# Third DB = SSTs split by **1-hour (3600s) event-time buckets** (see st_bucket_ingest_build --bucket-sec 3600);
-# `776sst` / `736sst` are legacy folder names — actual *.sst count is data-dependent (often ~700+).
-# If `D:\Project\data\verify_wuxi_segment_776sst` is missing, we fall back to `..._736sst` with a warning.
+# Full ablation: st_meta_read_bench over Wuxi segment DBs (default **1 / 164 / third hourly multi-SST** paths).
+# Third DB (**standard**) = `verify_wuxi_segment_bucket3600_sst`: segments partitioned by **event time** into
+# **1-hour (3600s) buckets** via `st_bucket_ingest_build --bucket-sec 3600` (see tools\build_wuxi_segment_third_tier_hourly.ps1).
+# Live `*.sst` count **N** is data-dependent (often ~700+). Legacy dirs `776sst` / `736sst` are optional fallbacks.
 # Default windows (priority):
-#   1) tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv — bench-validated, each window
-#      full_keys>=50 on 1-SST DB (generate_wuxi_random_windows_validated.py).
-#   2) tools/st_validity_experiment_windows_wuxi_random12_s42.csv — uniform random in dense envelope
-#      (excludes wide_baseline + long t_slice rows); NOT key-validated.
+#   1) tools/st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv — **canonical** 12 windows (4 narrow + 4 medium + 4 wide),
+#      bench-validated full_keys>=50 on 1-SST (validate_wuxi_windows_csv.py). See EXPERIMENTS_AND_SCRIPTS.md §0.3 / §2.2.
+#   2) tools/st_validity_experiment_windows_wuxi_random12_cov_s42.csv — legacy random12 cov (seed 42).
+#   3) tools/st_validity_experiment_windows_wuxi_random12_s42.csv — uniform random in dense envelope; NOT key-validated.
 # Hand-picked 12 scenarios: pass -WindowsCsv tools/st_validity_experiment_windows_wuxi.csv
 #
 # Regenerate validated CSV (requires st_meta_read_bench + verify_wuxi_segment_1sst):
@@ -29,7 +29,8 @@
 #   - Else st_segment_window_scan_vanilla.exe is invoked per window on the Vanilla wall path (slow).
 #   - Only if neither exists: pass -AllowForkFullBaseline to allow fork full_wall_us only (legacy / debugging).
 # Build cache: tools\cache_wuxi_vanilla_wall_baseline.ps1
-# Full batch: tools\run_wuxi_vanilla_cached_ablation_batch.ps1 -VerifyKVResults
+# Full batch: tools\run_wuxi_vanilla_cached_ablation_batch.ps1
+# **默认**对 fork 跑 full↔prune `--verify-kv-results`（含 Vanilla 基线时的额外交互）；`-SkipVerifyKVResults` 可关。
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File D:\Project\tools\run_wuxi_segment_ablation_1_164_776.ps1
@@ -43,10 +44,10 @@
 
 param(
   [string]$WindowsCsv = "",
-  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_776sst",
+  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_bucket3600_sst",
   [string]$OutDir = "",
   [switch]$SummarizePooled,
-  [switch]$VerifyKVResults,
+  [switch]$SkipVerifyKVResults,
   [int]$IteratorRepeat = 1,
   [bool]$VirtualMerge = $true,
   [bool]$VirtualMergeAuto = $true,
@@ -74,11 +75,14 @@ if (-not (Test-Path -LiteralPath $Sweep)) {
   throw "Missing: $Sweep"
 }
 
+$Stratified12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_stratified12_n4m4w4.csv"
 $Random12Cov = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_cov_s42.csv"
 $Random12 = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi_random12_s42.csv"
 $LegacyWindows = Join-Path $ToolsDir "st_validity_experiment_windows_wuxi.csv"
 if ([string]::IsNullOrWhiteSpace($WindowsCsv)) {
-  if (Test-Path -LiteralPath $Random12Cov) {
+  if (Test-Path -LiteralPath $Stratified12) {
+    $WindowsCsv = $Stratified12
+  } elseif (Test-Path -LiteralPath $Random12Cov) {
     $WindowsCsv = $Random12Cov
   } elseif (Test-Path -LiteralPath $Random12) {
     $WindowsCsv = $Random12
@@ -90,19 +94,16 @@ if (-not (Test-Path -LiteralPath $WindowsCsv)) {
   throw "Missing: $WindowsCsv"
 }
 
-$p776 = "D:\Project\data\verify_wuxi_segment_776sst"
-$p736 = "D:\Project\data\verify_wuxi_segment_736sst"
-$used736Fallback = $false
-if ($RocksDbPathsCsv -match "776sst" -and -not (Test-Path -LiteralPath $p776) -and (Test-Path -LiteralPath $p736)) {
-  Write-Warning "verify_wuxi_segment_776sst not found; using verify_wuxi_segment_736sst for this run."
-  $RocksDbPathsCsv = $RocksDbPathsCsv.Replace("verify_wuxi_segment_776sst", "verify_wuxi_segment_736sst")
-  $used736Fallback = $true
-}
+. (Join-Path $ToolsDir "wuxi_resolve_third_tier_fork.ps1")
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $ToolsDir "..\data"))
+$r3 = Get-WuxiResolvedThirdTierCsv -RocksDbPathsCsv $RocksDbPathsCsv -DataRoot $dataRoot
+$RocksDbPathsCsv = $r3.RocksDbPathsCsv
+$used736Fallback = ($r3.ResolvedThirdPath -match "verify_wuxi_segment_736sst$")
 
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
   $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-  $fb = if ($used736Fallback) { "_736sst_fallback" } else { "" }
-  $OutDir = Join-Path $ToolsDir "..\data\experiments\wuxi_ablation_1_164_776_${stamp}${fb}"
+  $fb = if ($r3.ThirdTierUsedPathFallback) { "_third_tier_path_fallback" } else { "" }
+  $OutDir = Join-Path $ToolsDir "..\data\experiments\wuxi_ablation_1_164_hourly_${stamp}${fb}"
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
@@ -173,19 +174,31 @@ if ($compareBaseline -eq "vanilla") {
 # When reading baseline from JSON cache, require cache hits (no silent fallback to fork full for ratio_wall).
 $sweepRequireVanilla = $useVanillaWallCache -or $RequireVanillaFromCache.IsPresent
 
+$forkParts = @($RocksDbPathsCsv.Split(",") | ForEach-Object { $_.Trim() })
+$thirdFork = if ($forkParts.Count -ge 3) { $forkParts[2] } else { "" }
+$thirdSstCount = 0
+if ($thirdFork -ne "" -and (Test-Path -LiteralPath $thirdFork)) {
+  $thirdSstCount = (Get-ChildItem -LiteralPath $thirdFork -Filter "*.sst" -File -ErrorAction SilentlyContinue | Measure-Object).Count
+}
 $meta = @{
-  used_736sst_fallback = $used736Fallback
-  rocks_db_paths_csv   = $RocksDbPathsCsv
-  windows_csv          = $WindowsCsv
-  generated_utc        = (Get-Date).ToUniversalTime().ToString("o")
-  vanilla_segment_bench_exe = $VanillaSegmentBench
-  vanilla_segment_bench_present = $vanillaPresent
-  vanilla_wall_cache_json = if ($useVanillaWallCache) { $VanillaWallCacheJson } else { "" }
-  compare_baseline = $compareBaseline
+  third_tier_semantic            = "hourly_3600s_bucket_ingest"
+  third_tier_hourly_bucket_sec   = 3600
+  third_tier_resolved_fork_path  = $thirdFork
+  third_tier_live_sst_count      = $thirdSstCount
+  third_tier_used_path_fallback  = [bool]$r3.ThirdTierUsedPathFallback
+  third_tier_legacy_dir_name     = [bool]$r3.ThirdTierLegacyDirName
+  used_736sst_fallback           = $used736Fallback
+  rocks_db_paths_csv             = $RocksDbPathsCsv
+  windows_csv                    = $WindowsCsv
+  generated_utc                  = (Get-Date).ToUniversalTime().ToString("o")
+  vanilla_segment_bench_exe    = $VanillaSegmentBench
+  vanilla_segment_bench_present  = $vanillaPresent
+  vanilla_wall_cache_json        = if ($useVanillaWallCache) { $VanillaWallCacheJson } else { "" }
+  compare_baseline               = $compareBaseline
   vanilla_replaces_fork_full_in_tsv = ($compareBaseline -eq "vanilla")
-  vanilla_wall_db_paths_csv = $effectiveVanillaWallDbCsv
-  require_vanilla_from_cache = [bool]$RequireVanillaFromCache
-  allow_fork_full_baseline = [bool]$AllowForkFullBaseline
+  vanilla_wall_db_paths_csv      = $effectiveVanillaWallDbCsv
+  require_vanilla_from_cache     = [bool]$RequireVanillaFromCache
+  allow_fork_full_baseline       = [bool]$AllowForkFullBaseline
 }
 $metaPath = Join-Path $OutDir "wuxi_ablation_run_meta.json"
 $meta | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $metaPath -Encoding utf8
@@ -206,7 +219,7 @@ foreach ($mode in $modes) {
     "-AdaptiveOverlapThreshold", "$AdaptiveOverlapThreshold",
     "-AdaptiveBlockOverlapThreshold", "$AdaptiveBlockOverlapThreshold"
   )
-  if ($VerifyKVResults.IsPresent) {
+  if (-not $SkipVerifyKVResults.IsPresent) {
     $args += "-VerifyKVResults"
   }
   if ($IteratorRepeat -gt 1) {

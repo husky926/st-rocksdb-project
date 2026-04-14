@@ -37,19 +37,37 @@ def db_sort_key(path: str) -> tuple[int, str]:
         return (0, path)
     if "segment_164" in p:
         return (1, path)
-    if "segment_776" in p or "segment_736" in p:
+    if "segment_776" in p or "segment_736" in p or "bucket3600" in p:
         return (2, path)
     return (9, path)
 
 
+def count_live_sst(db_path: str) -> int | None:
+    try:
+        p = Path(db_path)
+        if p.is_dir():
+            return sum(1 for _ in p.glob("*.sst"))
+    except OSError:
+        pass
+    return None
+
+
+def tier_label_for_db(db: str, idx: int, run_meta: dict) -> str:
+    """Column title ``'{N} SST'`` from disk; third tier falls back to run_meta."""
+    n = count_live_sst(db)
+    if n is not None:
+        return f"{n} SST"
+    if idx == 2:
+        m = run_meta.get("third_tier_live_sst_count")
+        if isinstance(m, int) and m > 0:
+            return f"{m} SST"
+    return "? SST"
+
+
 def short_db_label(path: str) -> str:
-    p = path.lower()
-    if "segment_1sst" in p and "164" not in p:
-        return "1 SST"
-    if "segment_164" in p:
-        return "164 SST"
-    if "segment_736" in p or "segment_776" in p:
-        return "736 SST"
+    n = count_live_sst(path)
+    if n is not None:
+        return f"{n} SST"
     return Path(path).name
 
 
@@ -268,6 +286,10 @@ def main() -> int:
                 f"其余跑次未验证或缺行"
             )
 
+    run_meta0 = load_optional_run_meta(run_dirs[0])
+    tier_labs = [tier_label_for_db(db, i, run_meta0) for i, db in enumerate(dbs)]
+    t1, t2, t3 = tier_labs[0], tier_labs[1], tier_labs[2]
+
     # Print markdown
     qps_hdr = (
         "QPS Vanilla → prune"
@@ -279,8 +301,8 @@ def main() -> int:
         f"(full_keys>={args.min_full_keys}, baseline={args.baseline})\n"
     )
     hdr = (
-        "| 模式 | speedup (1 SST) | speedup (164 SST) | speedup (736 SST) | "
-        f"{qps_hdr} (1 SST) | {qps_hdr} (164 SST) | {qps_hdr} (736 SST) | 准确性 |\n"
+        f"| 模式 | speedup ({t1}) | speedup ({t2}) | speedup ({t3}) | "
+        f"{qps_hdr} ({t1}) | {qps_hdr} ({t2}) | {qps_hdr} ({t3}) | 准确性 |\n"
     )
     sep = "|------|----------------|-------------------|-------------------|---------------------------|-----------------------------|-----------------------------|--------|\n"
 
@@ -309,7 +331,6 @@ def main() -> int:
 
     print("\n".join(lines))
 
-    run_meta0 = load_optional_run_meta(run_dirs[0])
     payload = {
         "n_runs": len(run_dirs),
         "min_full_keys": args.min_full_keys,
@@ -318,6 +339,7 @@ def main() -> int:
         "aggregate": agg,
         "mode_kv": mode_kv,
         "run_meta": run_meta0,
+        "tier_column_labels": tier_labs,
     }
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
@@ -329,8 +351,8 @@ def main() -> int:
         qh = "QPS Vanilla → prune" if args.baseline == "vanilla" else "QPS baseline → prune"
         h = (
             "<table>\n<thead><tr>"
-            "<th>模式</th><th>speedup (1 SST)</th><th>speedup (164 SST)</th><th>speedup (736 SST)</th>"
-            f"<th>{qh} (1 SST)</th><th>{qh} (164 SST)</th><th>{qh} (736 SST)</th>"
+            f"<th>模式</th><th>speedup ({t1})</th><th>speedup ({t2})</th><th>speedup ({t3})</th>"
+            f"<th>{qh} ({t1})</th><th>{qh} ({t2})</th><th>{qh} ({t3})</th>"
             "<th>准确性</th></tr></thead>\n<tbody>\n"
         )
         body = ""

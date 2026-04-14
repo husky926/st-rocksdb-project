@@ -1,7 +1,7 @@
 param(
   [int]$Rounds = 5,
   [string]$WindowsCsv = "D:\Project\tools\st_validity_experiment_windows_wuxi.csv",
-  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_776sst",
+  [string]$RocksDbPathsCsv = "D:\Project\data\verify_wuxi_segment_1sst,D:\Project\data\verify_wuxi_segment_164sst,D:\Project\data\verify_wuxi_segment_bucket3600_sst",
   [string]$OutDir = "",
   [uint32]$VmTimeSpanSecThreshold = 21600,
   [uint32]$TimeBucketCount = 736,
@@ -23,12 +23,10 @@ if (-not (Test-Path -LiteralPath $WindowsCsv)) {
   throw "Missing windows CSV: $WindowsCsv"
 }
 
-$p776 = "D:\Project\data\verify_wuxi_segment_776sst"
-$p736 = "D:\Project\data\verify_wuxi_segment_736sst"
-if ($RocksDbPathsCsv -match "776sst" -and -not (Test-Path -LiteralPath $p776) -and (Test-Path -LiteralPath $p736)) {
-  Write-Warning "verify_wuxi_segment_776sst not found; using verify_wuxi_segment_736sst for this run."
-  $RocksDbPathsCsv = $RocksDbPathsCsv.Replace("verify_wuxi_segment_776sst", "verify_wuxi_segment_736sst")
-}
+. (Join-Path $ToolsDir "wuxi_resolve_third_tier_fork.ps1")
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $ToolsDir "..\data"))
+$r3 = Get-WuxiResolvedThirdTierCsv -RocksDbPathsCsv $RocksDbPathsCsv -DataRoot $dataRoot
+$RocksDbPathsCsv = $r3.RocksDbPathsCsv
 
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
   $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
